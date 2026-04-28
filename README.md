@@ -4,8 +4,8 @@ Axon is a private Android-to-Android bridge for keeping a secondary Android phon
 
 The first production target is a two-device setup:
 
-- **Sender**: Xiaomi phone that receives the original SMS and call events.
-- **Receiver**: Pixel phone that stays connected to the Sender over the local network, shows mirrored alerts, forwards those alerts to the user's watch through the normal Android notification pipeline, and keeps a local SMS inbox.
+- **Sender**: the Android phone that receives the original SMS and call events.
+- **Receiver**: the Android phone that stays connected to the Sender over the local network, shows mirrored alerts, forwards those alerts to the user's watch through the normal Android notification pipeline, and keeps a local SMS inbox.
 
 Phase 1 intentionally optimizes for practical daily use on the user's own devices. Network security, pairing, encryption, and multi-user hardening are explicitly out of scope for now.
 
@@ -18,7 +18,7 @@ The business value is not "another SMS app." Axon is a local device bridge:
 - It keeps the original phone as the source of truth.
 - It mirrors important events to a second phone without cloud infrastructure.
 - It lets the second phone behave like a companion inbox and notification relay.
-- It works around OEM-specific background limitations, especially Xiaomi/HyperOS behavior.
+- It works around OEM-specific background and notification limitations.
 
 The current MVP focuses on reliability for SMS delivery:
 
@@ -27,7 +27,7 @@ The current MVP focuses on reliability for SMS delivery:
 3. Sender sends a structured event to Receiver over WebSocket.
 4. Receiver shows a high-priority mirrored notification.
 5. Receiver stores the SMS in a thread-based inbox.
-6. A connected watch, such as Amazfit through Zepp, can mirror Axon notifications from the Receiver.
+6. A connected watch can mirror Axon notifications from the Receiver through the phone's normal notification pipeline or companion app.
 
 ## Current Feature Set
 
@@ -64,9 +64,9 @@ The archive is currently local to the Receiver and stores mirrored SMS messages 
 
 ### Watch Support
 
-Axon does not talk directly to Amazfit watches. Instead, the Receiver creates normal Android notifications and the watch companion app mirrors them.
+Axon does not talk directly to watches. Instead, the Receiver creates normal Android notifications and the watch companion app or system notification bridge mirrors them.
 
-For Amazfit devices, the Zepp app must be configured to allow notifications from **Axon**. From the watch's point of view, mirrored SMS messages are Axon notifications, not Messages/SMS app notifications.
+For companion-app-based watches, the companion app must be configured to allow notifications from **Axon**. From the watch's point of view, mirrored SMS messages are Axon notifications, not Messages/SMS app notifications.
 
 ### Diagnostics
 
@@ -152,7 +152,7 @@ Important message types:
   "type": "HELLO",
   "hello": {
     "role": "Source",
-    "deviceName": "Xiaomi 11T Pro",
+    "deviceName": "Sender device",
     "appVersion": "0.1.0"
   }
 }
@@ -164,7 +164,7 @@ Important message types:
   "payload": {
     "id": "stable-id",
     "category": "SMS",
-    "originDevice": "Xiaomi 11T Pro",
+    "originDevice": "Sender device",
     "title": "Sender name or number",
     "message": "SMS body",
     "packageName": "android.provider.Telephony.SMS_RECEIVED",
@@ -214,9 +214,9 @@ Axon uses permissions according to role and feature:
 
 Notification Access is not a manifest runtime permission. It is managed through Android settings and is used by `AxonNotificationListenerService`.
 
-## Xiaomi / HyperOS Notes
+## OEM Background Notes
 
-For Sender mode on Xiaomi/HyperOS, Android permissions are often not enough. The user may also need to configure:
+For Sender mode on some Android OEM builds, Android permissions are often not enough. The user may also need to configure:
 
 - Auto-start enabled.
 - Battery set to "No restrictions."
@@ -224,19 +224,19 @@ For Sender mode on Xiaomi/HyperOS, Android permissions are often not enough. The
 - Notification access enabled when using notification-listener capture.
 - SMS and Contacts permissions allowed.
 
-The SMS broadcast path was added because some Xiaomi setups do not reliably expose SMS notifications through `NotificationListenerService`.
+The SMS broadcast path was added because some OEM setups do not reliably expose SMS notifications through `NotificationListenerService`.
 
 ## Receiver / Watch Notes
 
-Receiver notifications are normal Android notifications created by Axon. For Amazfit:
+Receiver notifications are normal Android notifications created by Axon. For watches that depend on a phone companion app:
 
-- Open Zepp.
+- Open the watch companion app.
 - Enable App Alerts.
 - Allow notifications from Axon.
-- Make sure Zepp has notification access.
-- Disable aggressive battery restrictions for Zepp if notifications are delayed.
+- Make sure the companion app has notification access.
+- Disable aggressive battery restrictions for the companion app if notifications are delayed.
 
-If SMS reaches the Pixel but not the watch, the bridge is working and the remaining issue is usually the watch companion app's notification allowlist.
+If SMS reaches the Receiver phone but not the watch, the bridge is working and the remaining issue is usually the watch companion app's notification allowlist.
 
 ## Build And Run
 

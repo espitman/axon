@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import com.axon.bridge.data.AxonSettings
 import com.axon.bridge.data.BridgeCommandBus
+import com.axon.bridge.data.CallAlertStore
 import com.axon.bridge.data.DeviceInfoProvider
 import com.axon.bridge.data.DiagnosticsLog
 import com.axon.bridge.data.NetworkInfoProvider
@@ -61,6 +62,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         )
         viewModelScope.launch {
             SmsArchiveStore.messages.collect {
+                refresh()
+            }
+        }
+        viewModelScope.launch {
+            CallAlertStore.activeCall.collect {
                 refresh()
             }
         }
@@ -174,6 +180,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         refresh()
     }
 
+    fun dismissActiveCall() {
+        CallAlertStore.clear()
+        refresh()
+    }
+
     private fun buildState(): HomeState {
         val role = settings.role
         val localIp = networkInfoProvider.localIpAddress()
@@ -190,6 +201,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             permissions = permissionStatuses(role),
             diagnostics = DiagnosticsLog.entries.value,
             smsThreads = SmsArchiveStore.threads(),
+            activeCall = CallAlertStore.activeCall.value,
             errorMessage = BridgeService.errorMessage.value
         )
     }

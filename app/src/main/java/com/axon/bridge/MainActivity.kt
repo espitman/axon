@@ -1,14 +1,19 @@
 package com.axon.bridge
 
 import android.Manifest
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
@@ -86,6 +91,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -100,9 +106,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
 import com.axon.bridge.domain.HomeState
+import com.axon.bridge.domain.NotificationPayload
 import com.axon.bridge.domain.SmsArchiveMessage
 import com.axon.bridge.domain.SmsThread
 import com.axon.bridge.presentation.HomeViewModel
+import com.axon.bridge.data.CallAlertStore
+import com.axon.bridge.service.MirroredNotificationManager
 import java.text.DateFormat
 import java.util.Date
 
@@ -202,6 +211,65 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+class CallActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        }
+
+        val callTitle = intent.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "Incoming call" }
+        val callMessage = intent.getStringExtra(EXTRA_MESSAGE).orEmpty().ifBlank { "Incoming call" }
+        val originDevice = intent.getStringExtra(EXTRA_ORIGIN).orEmpty()
+        val notificationId = intent.getIntExtra(EXTRA_NOTIFICATION_ID, 0)
+
+        setContent {
+            AxonTheme {
+                IncomingCallScreen(
+                    caller = callTitle,
+                    message = callMessage,
+                    originDevice = originDevice,
+                    onDismiss = {
+                        if (notificationId != 0) {
+                            NotificationManagerCompat.from(this).cancel(notificationId)
+                        }
+                        getSystemService(NotificationManager::class.java)?.cancel(notificationId)
+                        CallAlertStore.clear()
+                        finish()
+                    }
+                )
+            }
+        }
+    }
+
+    companion object {
+        private const val EXTRA_TITLE = "extra_title"
+        private const val EXTRA_MESSAGE = "extra_message"
+        private const val EXTRA_ORIGIN = "extra_origin"
+        private const val EXTRA_NOTIFICATION_ID = "extra_notification_id"
+
+        fun intent(context: Context, payload: NotificationPayload, notificationId: Int): Intent {
+            return Intent(context, CallActivity::class.java).apply {
+                putExtra(EXTRA_TITLE, payload.title)
+                putExtra(EXTRA_MESSAGE, payload.message)
+                putExtra(EXTRA_ORIGIN, payload.originDevice)
+                putExtra(EXTRA_NOTIFICATION_ID, notificationId)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+        }
+    }
+}
+
 @Composable
 private fun AxonTheme(content: @Composable () -> Unit) {
     MaterialTheme(
@@ -223,13 +291,23 @@ private fun AxonTheme(content: @Composable () -> Unit) {
 @Composable
 private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
     val ipSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var isIpSheetOpen by remember { mutableStateOf(false) }
     var currentPage by remember { mutableStateOf(AxonPage.Home) }
     var selectedThreadId by remember { mutableStateOf<String?>(null) }
     var draftReceiverIp by remember { mutableStateOf("") }
 
-    BackHandler(enabled = currentPage != AxonPage.Home) {
+    fun dismissCall(payload: NotificationPayload) {
+        NotificationManagerCompat.from(context).cancel(MirroredNotificationManager.notificationId(payload))
+        viewModel.dismissActiveCall()
+    }
+
+    BackHandler(enabled = state.activeCall != null) {
+        state.activeCall?.let(::dismissCall)
+    }
+
+    BackHandler(enabled = state.activeCall == null && currentPage != AxonPage.Home) {
         currentPage = if (currentPage == AxonPage.Thread) AxonPage.Inbox else AxonPage.Home
     }
 
@@ -361,6 +439,15 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                         }
                     )
                 }
+            }
+
+            state.activeCall?.let { call ->
+                IncomingCallScreen(
+                    caller = call.title,
+                    message = call.message,
+                    originDevice = call.originDevice,
+                    onDismiss = { dismissCall(call) }
+                )
             }
         }
     }
@@ -1122,6 +1209,134 @@ private fun EmptyInbox() {
                 fontSize = 13.sp,
                 maxLines = 1
             )
+        }
+    }
+}
+
+@Composable
+private fun IncomingCallScreen(
+    caller: String,
+    message: String,
+    originDevice: String,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF0C1719),
+                        AxonColor.Background,
+                        Color(0xFF050708)
+                    )
+                )
+            )
+            .padding(horizontal = 24.dp, vertical = 28.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Spacer(Modifier.height(18.dp))
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Canvas(modifier = Modifier.size(196.dp)) {
+                        val center = Offset(size.width / 2f, size.height / 2f)
+                        drawCircle(
+                            color = AxonColor.Cyan.copy(alpha = 0.08f),
+                            radius = size.minDimension * 0.48f,
+                            center = center
+                        )
+                        drawCircle(
+                            color = AxonColor.Cyan.copy(alpha = 0.14f),
+                            radius = size.minDimension * 0.36f,
+                            center = center
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(112.dp)
+                            .clip(CircleShape)
+                            .background(AxonColor.PanelRaised)
+                            .border(1.dp, AxonColor.Cyan.copy(alpha = 0.55f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = caller.take(1).ifBlank { "?" },
+                            color = AxonColor.Cyan,
+                            fontSize = 42.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = VazirmatnFontFamily,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                Text(
+                    text = message.ifBlank { "Incoming call" },
+                    color = AxonColor.Cyan,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+                Text(
+                    text = caller.ifBlank { "Incoming call" },
+                    color = AxonColor.Text,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = VazirmatnFontFamily,
+                    textAlign = TextAlign.Center,
+                    style = TextStyle(textDirection = TextDirection.ContentOrRtl),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (originDevice.isNotBlank()) {
+                    Text(
+                        text = "Mirrored from $originDevice",
+                        color = AxonColor.Muted,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AxonColor.Red,
+                        contentColor = Color(0xFF210707)
+                    )
+                ) {
+                    Text(
+                        text = "Dismiss",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
+                Text(
+                    text = "Axon call alert",
+                    color = AxonColor.Muted,
+                    fontSize = 12.sp,
+                    maxLines = 1
+                )
+            }
         }
     }
 }

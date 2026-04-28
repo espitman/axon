@@ -12,6 +12,7 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.axon.bridge.R
 import com.axon.bridge.data.BridgeTransport
+import com.axon.bridge.data.CallAlertStore
 import com.axon.bridge.data.DeviceInfoProvider
 import com.axon.bridge.data.NetworkInfoProvider
 import com.axon.bridge.data.SmsArchiveStore
@@ -51,6 +52,8 @@ class BridgeService : Service() {
             onNotificationReceived = { payload ->
                 if (payload.category == NotificationCategory.Sms) {
                     SmsArchiveStore.add(this, payload)
+                } else if (payload.category == NotificationCategory.Call) {
+                    CallAlertStore.show(payload)
                 }
                 mirroredNotificationManager.show(payload)
             }

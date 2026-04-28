@@ -40,5 +40,6 @@ data class HomeState(
     val permissions: List<PermissionStatus> = emptyList(),
     val diagnostics: List<String> = emptyList(),
     val smsThreads: List<SmsThread> = emptyList(),
+    val activeCall: NotificationPayload? = null,
     val errorMessage: String? = null
 )

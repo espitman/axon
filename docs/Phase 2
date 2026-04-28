@@ -1,0 +1,93 @@
+Technical Specification: DroidBridge P2P (Phase 2 - Media Integration)
+1. Project Extension Overview
+Phase 2 extends the existing WebSocket tunnel to support Bi-directional Media Synchronization. The goal is to mirror the playback state of the Source Device (Xiaomi) to the Sink Device (Pixel) and allow the Pixel (and its connected Watch) to remotely control the media transport (Play, Pause, Next, Previous).
+
+2. Functional Requirements
+A. Media Mirroring (Source to Sink)
+Active Session Tracking: The Client must monitor the system for the primary active MediaSession.
+
+Metadata Extraction: Real-time extraction of track Title, Artist, Album, Duration, and Current Position.
+
+Playback State Monitoring: Detection of state changes (Playing, Paused, Buffering, Stopped).
+
+B. Remote Control (Sink to Source)
+Command Dispatch: The Sink device must translate UI/Notification actions into commands and send them back via WebSocket.
+
+Media Injection: The Sink must maintain a "Shadow MediaSession" to ensure the Smartwatch displays the media controller UI.
+
+3. Detailed Technical Requirements
+3.1 Media Session Interception (Client/Source)
+Service: Utilize MediaSessionManager.OnActiveSessionsChangedListener.
+
+Logic: * Identify the top-priority active session (e.g., Spotify, YouTube).
+
+Attach a MediaController.Callback to the active session.
+
+Throttling: Do NOT stream the "Current Position" every millisecond. Instead, send a MediaPayload only when:
+
+The track changes.
+
+The playback state changes (Play -> Pause).
+
+A manual "seek" occurs.
+
+Payload Calculation: Include lastUpdateTime (SystemClock.elapsedRealtime) so the Sink can locally extrapolate the seek bar progress.
+
+3.2 Media Style Notification (Server/Sink)
+Implementation: Use androidx.media.app.NotificationCompat.MediaStyle.
+
+MediaSession Reconstruction: The Sink must create its own MediaSession instance.
+
+This session doesn't play audio; it acts as a Proxy.
+
+Update this proxy session with metadata received from the Client.
+
+Watch Integration: Setting the MediaSession to isActive = true on the Pixel will automatically trigger the "Now Playing" controller on the connected Wear OS watch.
+
+3.3 Command Back-channel
+When the user clicks "Next" on the Smartwatch:
+
+The Pixel’s MediaSession.Callback receives onSkipToNext().
+
+The Server sends a {"type": "MEDIA_COMMAND", "action": "SKIP_TO_NEXT"} JSON through the WebSocket.
+
+The Xiaomi Client receives the JSON and calls mediaController.transportControls.skipToNext().
+
+4. Extended Data Schema (JSON)
+JSON
+{
+  "type": "MEDIA_UPDATE",
+  "payload": {
+    "title": "String",
+    "artist": "String",
+    "album": "String",
+    "duration": Long,
+    "position": Long,
+    "playbackSpeed": Float,
+    "isPlaying": Boolean,
+    "lastPositionUpdateTime": Long,
+    "packageName": "String"
+  }
+}
+
+{
+  "type": "MEDIA_COMMAND",
+  "action": "PLAY | PAUSE | SKIP_TO_NEXT | SKIP_TO_PREVIOUS"
+}
+5. Logic for Seek-Bar Synchronization
+To avoid high network traffic, use the Reference Point Formula:
+
+Client sends: position: 45000ms, timestamp: 1000500ms.
+
+Server calculates local display: currentDisplayPos = 45000 + (SystemClock.elapsedRealtime() - 1000500).
+
+This ensures the seek bar on the watch moves smoothly without constant updates over the air.
+
+6. Instructions for the AI Assistant (Codex/Cursor)
+MediaController Integration: In the Client role, use MediaSessionManager to retrieve the MediaController for the active app.
+
+Callback Management: Ensure callbacks are properly unRegistered when the WebSocket disconnects or the active app changes to prevent memory leaks.
+
+Proxy Session: On the Server side, the MediaSession should have MediaSession.Token linked to the MediaStyle notification.
+
+Error Handling: Handle cases where the Client has multiple media apps open (prioritize the one with PlaybackState.STATE_PLAYING).

@@ -1,0 +1,102 @@
+Technical Specification: DroidBridge P2P (Phase 1)
+1. Project Overview
+DroidBridge is a high-performance, low-latency synchronization service designed to bridge the gap between two Android devices. In Phase 1, the system must facilitate the real-time mirroring of System Notifications (SMS) and Telephony Events (Incoming Calls) from a Source Device (Xiaomi) to a Sink Device (Pixel) via a persistent WebSocket tunnel over LAN.
+
+2. System Architecture & Role Definitions
+A. Server Role (The Sink - Google Pixel 9 Pro XL)
+Networking: Hosts a Ktor WebSocket Server (CIO Engine) on a dedicated port (default: 8080).
+
+Service Layer: A Sticky Foreground Service that manages the Ktor engine and keeps the CPU partially awake via Partial WakeLock.
+
+Notification Engine: Receives JSON payloads and utilizes NotificationManager to inject "Virtual Notifications" into the system.
+
+Watch Synchronization: By injecting notifications with PRIORITY_MAX and VISIBILITY_PUBLIC, the OS automatically pushes these alerts to any connected Wear OS device.
+
+B. Client Role (The Source - Xiaomi 11T Pro)
+Networking: A Ktor WebSocket Client with an active monitoring thread for connection health.
+
+Interception Layer: Implements NotificationListenerService.
+
+Filtering Logic: Strictly white-listed package filtering for Telephony and SMS providers.
+
+Event Pipeline: Converts StatusBarNotification (SBN) objects into serialized JSON structures and dispatches them via the WebSocket.
+
+3. Detailed Technical Requirements
+3.1 Connectivity & Protocol
+Protocol: WebSocket (RFC 6455).
+
+Serialization: Kotlinx.serialization (JSON).
+
+Keep-Alive: Implement a 30-second Ping/Pong interval to prevent the local router (or M1 Router setup) from dropping the idle socket.
+
+Reconnection: Implement an Exponential Backoff strategy (starting at 2s, capping at 60s) for the Client.
+
+3.2 Notification Interception (Source Side)
+The NotificationListenerService must override onNotificationPosted(sbn: StatusBarNotification).
+
+SMS Filter: Intercept package com.google.android.apps.messaging or com.android.mms.
+
+Call Filter: Intercept package com.google.android.dialer or com.android.server.telecom.
+
+Data Extraction:
+
+Title: Extract using Notification.EXTRA_TITLE.
+
+Content: Extract using Notification.EXTRA_TEXT.
+
+Priority: Map the source priority to the payload.
+
+3.3 Notification Injection (Sink Side)
+Channel Management: Create a dedicated NotificationChannel named "Mirrored Alerts" with IMPORTANCE_HIGH.
+
+Uniqueness: Generate a consistent Notification ID by hashing the source packageName + title to prevent notification spamming while allowing updates to the same alert.
+
+Metadata: Use setSmallIcon with a generic "Remote" icon to distinguish mirrored alerts from local ones.
+
+3.4 Persistence & Reliability (The "Android-Proofing")
+Foreground Service: Both roles must display a persistent, non-dismissible notification explaining the active bridge status.
+
+Power Management:
+
+Request ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS.
+
+Utilize PowerManager.WakeLock to ensure the WebSocket doesn't sleep during inactive periods.
+
+Xiaomi Specifics: Document the need for manual "Auto-start" and "No restrictions" battery settings in HyperOS/MIUI.
+
+4. Data Schema (JSON)
+JSON
+{
+  "type": "NOTIFICATION_EVENT",
+  "payload": {
+    "id": "String (UUID/Hash)",
+    "category": "SMS | CALL",
+    "originDevice": "Xiaomi 11T Pro",
+    "title": "String",
+    "message": "String",
+    "packageName": "String",
+    "postedTime": Long
+  }
+}
+5. User Interface Requirements (Jetpack Compose)
+Status Dashboard: Real-time indicator of the WebSocket state (Disconnected, Connecting, Connected).
+
+Role Switch: A prominent toggle to switch between Server and Client modes.
+
+Configuration: * Server Mode: Display the device's Local IP.
+
+Client Mode: Input field for the Server's IP address.
+
+Permission Monitor: A list of required permissions (Notification Access, Battery Optimization, etc.) with their current status (Granted/Denied).
+
+6. Security Considerations
+Handshake: (Optional for Phase 1) A simple AUTH_TOKEN in the WebSocket header to ensure only your two devices can communicate.
+
+Local-Only: The server must bind to the local network interface only.
+
+Instructions for the AI Assistant (Codex/Cursor):
+Architecture: Use a Clean Architecture approach. Separate the Domain (models), Data (Ktor/Serialization), and Presentation (Compose/ViewModel).
+
+Threading: Use Dispatchers.IO for all networking and Dispatchers.Main for notification triggers.
+
+Lifecycle: Ensure the WebSocket server/client is tied to the Service lifecycle, NOT the Activity lifecycle.

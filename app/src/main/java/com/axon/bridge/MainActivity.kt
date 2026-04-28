@@ -172,6 +172,22 @@ class MainActivity : ComponentActivity() {
             permissions += Manifest.permission.READ_CONTACTS
         }
 
+        val readPhoneStateGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.READ_PHONE_STATE
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!readPhoneStateGranted) {
+            permissions += Manifest.permission.READ_PHONE_STATE
+        }
+
+        val readCallLogGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.READ_CALL_LOG
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!readCallLogGranted) {
+            permissions += Manifest.permission.READ_CALL_LOG
+        }
+
         if (permissions.isNotEmpty()) {
             ActivityCompat.requestPermissions(
                 this,

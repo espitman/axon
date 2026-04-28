@@ -32,21 +32,27 @@ class AxonNotificationListenerService : NotificationListenerService() {
             ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
             ?: ""
+        val displayTitle = title.ifBlank {
+            if (category == NotificationCategory.Call) "Incoming call" else category.name
+        }
+        val displayMessage = message.ifBlank {
+            if (category == NotificationCategory.Call) "Incoming call" else ""
+        }
 
-        if (title.isBlank() && message.isBlank()) {
+        if (category != NotificationCategory.Call && title.isBlank() && message.isBlank()) {
             DiagnosticsLog.add("Skipped mirrored ${category.name}: empty title/message")
             return
         }
 
-        val stableId = "${sbn.packageName}|$title|$category".hashCode().absoluteValue.toString()
-        DiagnosticsLog.add("Queued mirrored ${category.name}: ${title.ifBlank { "(no title)" }}")
+        val stableId = "${sbn.packageName}|$displayTitle|$category".hashCode().absoluteValue.toString()
+        DiagnosticsLog.add("Queued mirrored ${category.name}: $displayTitle")
         NotificationEventBus.publish(
             NotificationPayload(
                 id = stableId,
                 category = category,
                 originDevice = deviceInfoProvider.currentDevice().displayName,
-                title = title.ifBlank { category.name },
-                message = message,
+                title = displayTitle,
+                message = displayMessage,
                 packageName = sbn.packageName,
                 postedTime = sbn.postTime
             )
@@ -60,8 +66,14 @@ class AxonNotificationListenerService : NotificationListenerService() {
             "com.miui.mms",
             "com.xiaomi.mms" -> NotificationCategory.Sms
             "com.google.android.dialer",
+            "com.android.dialer",
             "com.android.server.telecom",
             "com.android.incallui",
+            "com.samsung.android.dialer",
+            "com.huawei.contacts",
+            "com.oplus.dialer",
+            "com.coloros.dialer",
+            "com.miui.dialer",
             "com.google.android.apps.tachyon" -> NotificationCategory.Call
             else -> null
         }

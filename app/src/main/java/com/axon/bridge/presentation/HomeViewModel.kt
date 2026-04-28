@@ -200,6 +200,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             appContext.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         val receiveSmsGranted = appContext.checkSelfPermission(android.Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
         val readContactsGranted = appContext.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+        val readPhoneStateGranted = appContext.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        val readCallLogGranted = appContext.checkSelfPermission(android.Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
         val batteryOptimized = isIgnoringBatteryOptimizations()
 
         val notificationAccessStatus = when {
@@ -211,6 +213,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         return listOf(
             notificationAccessStatus,
             PermissionStatus("SMS receiver", if (receiveSmsGranted) "Granted" else "Denied", receiveSmsGranted),
+            PermissionStatus("Call receiver", if (readPhoneStateGranted) "Granted" else "Denied", readPhoneStateGranted),
+            PermissionStatus("Call details", if (readCallLogGranted) "Granted" else "Denied", readCallLogGranted),
             PermissionStatus("Contacts lookup", if (readContactsGranted) "Granted" else "Denied", readContactsGranted),
             PermissionStatus("App notifications", if (postNotificationsGranted) "Granted" else "Denied", postNotificationsGranted),
             PermissionStatus("Battery protection", if (batteryOptimized) "Granted" else "Restricted", batteryOptimized),

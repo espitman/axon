@@ -12,6 +12,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
+import com.axon.bridge.CallActivity
 import com.axon.bridge.R
 import com.axon.bridge.data.BridgeTransport
 import com.axon.bridge.data.CallAlertStore
@@ -21,9 +22,11 @@ import com.axon.bridge.data.MediaBridgeBus
 import com.axon.bridge.data.MediaSessionTracker
 import com.axon.bridge.data.ShadowMediaSession
 import com.axon.bridge.data.SmsArchiveStore
+import com.axon.bridge.domain.CallState
 import com.axon.bridge.domain.MediaCommandAction
 import com.axon.bridge.domain.MediaCommandPayload
 import com.axon.bridge.domain.MediaPayload
+import com.axon.bridge.domain.NotificationPayload
 import com.axon.bridge.domain.NotificationCategory
 import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
@@ -47,6 +50,7 @@ class BridgeService : Service() {
         super.onCreate()
         createNotificationChannel()
         SmsArchiveStore.init(this)
+        CallAlertStore.init(this)
         mirroredNotificationManager = MirroredNotificationManager(this)
         mediaNotificationManager = MediaNotificationManager(this)
         mediaSessionTracker = MediaSessionTracker(
@@ -77,12 +81,7 @@ class BridgeService : Service() {
                 sendStateChangedBroadcast()
             },
             onNotificationReceived = { payload ->
-                if (payload.category == NotificationCategory.Sms) {
-                    SmsArchiveStore.add(this, payload)
-                } else if (payload.category == NotificationCategory.Call) {
-                    CallAlertStore.show(payload)
-                }
-                mirroredNotificationManager.show(payload)
+                handleNotificationPayload(payload)
             },
             onMediaUpdateReceived = { payload ->
                 publishMedia(payload)
@@ -154,6 +153,7 @@ class BridgeService : Service() {
         mediaSessionTracker.stop()
         shadowMediaSession.stop()
         mediaNotificationManager.cancel()
+        CallAlertStore.clearActive()
         clearMedia()
         transport.stop()
         releaseWakeLock()
@@ -197,6 +197,43 @@ class BridgeService : Service() {
 
         DiagnosticsLog.add("Media notification command: $action")
         MediaBridgeBus.publishCommand(MediaCommandPayload(action))
+    }
+
+    private fun handleNotificationPayload(payload: NotificationPayload) {
+        when (payload.category) {
+            NotificationCategory.Sms -> {
+                SmsArchiveStore.add(this, payload)
+                mirroredNotificationManager.show(payload)
+            }
+            NotificationCategory.Call -> {
+                CallAlertStore.update(this, payload)
+                if (payload.callState == CallState.Ended) {
+                    mirroredNotificationManager.cancel(payload)
+                    DiagnosticsLog.add("Cleared mirrored call: ${payload.title}")
+                    return
+                }
+                mirroredNotificationManager.show(payload)
+                if (payload.callState == null || payload.callState == CallState.Ringing) {
+                    launchCallActivity(payload)
+                }
+            }
+        }
+    }
+
+    private fun launchCallActivity(payload: NotificationPayload) {
+        runCatching {
+            startActivity(
+                CallActivity.intent(
+                    context = this,
+                    payload = payload,
+                    notificationId = MirroredNotificationManager.notificationId(payload)
+                )
+            )
+        }.onSuccess {
+            DiagnosticsLog.add("Opened mirrored call screen: ${payload.title}")
+        }.onFailure { error ->
+            DiagnosticsLog.add("Call screen launch failed: ${error.message ?: error::class.simpleName}")
+        }
     }
 
     private fun handleMediaToggle() {
@@ -290,6 +327,7 @@ class BridgeService : Service() {
         mediaSessionTracker.stop()
         shadowMediaSession.release()
         mediaNotificationManager.cancel()
+        CallAlertStore.clearActive()
         clearMedia()
         transport.stop()
         releaseWakeLock()

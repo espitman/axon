@@ -31,9 +31,11 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,10 +64,13 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SkipNext
@@ -76,6 +81,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -85,10 +91,12 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -117,6 +125,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
+import com.axon.bridge.domain.CallLogEntry
+import com.axon.bridge.domain.CallState
 import com.axon.bridge.domain.DiscoveredReceiver
 import com.axon.bridge.domain.HomeState
 import com.axon.bridge.domain.MediaCommandAction
@@ -152,6 +162,7 @@ private val VazirmatnFontFamily = FontFamily(
 private enum class AxonPage {
     Home,
     Settings,
+    Calls,
     Inbox,
     Thread
 }
@@ -248,6 +259,10 @@ class CallActivity : ComponentActivity() {
 
         setContent {
             AxonTheme {
+                val activeCall by CallAlertStore.activeCall.collectAsState()
+                LaunchedEffect(activeCall) {
+                    if (activeCall == null) finish()
+                }
                 IncomingCallScreen(
                     caller = callTitle,
                     message = callMessage,
@@ -257,7 +272,7 @@ class CallActivity : ComponentActivity() {
                             NotificationManagerCompat.from(this).cancel(notificationId)
                         }
                         getSystemService(NotificationManager::class.java)?.cancel(notificationId)
-                        CallAlertStore.clear()
+                        CallAlertStore.clearActive()
                         finish()
                     }
                 )
@@ -316,6 +331,7 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
 
     fun dismissCall(payload: NotificationPayload) {
         NotificationManagerCompat.from(context).cancel(MirroredNotificationManager.notificationId(payload))
+        NotificationManagerCompat.from(context).cancel(MirroredNotificationManager.legacyNotificationId(payload))
         viewModel.dismissActiveCall()
     }
 
@@ -381,7 +397,8 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                                 selectedThreadId = threadId
                                 viewModel.markThreadRead(threadId)
                                 currentPage = AxonPage.Thread
-                            }
+                            },
+                            onDeleteThreads = viewModel::deleteSmsThreads
                         )
                     }
                     AxonPage.Thread -> {
@@ -390,7 +407,16 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                         ThreadScreen(
                             thread = thread,
                             messages = viewModel.messagesForThread(threadId),
-                            onBack = { currentPage = AxonPage.Inbox }
+                            onBack = { currentPage = AxonPage.Inbox },
+                            onDeleteMessages = viewModel::deleteSmsMessages
+                        )
+                    }
+                    AxonPage.Calls -> {
+                        CallsScreen(
+                            calls = state.callLogs,
+                            onBack = { currentPage = AxonPage.Home },
+                            onClearAll = viewModel::clearCallLogs,
+                            onDeleteCall = viewModel::deleteCallLog
                         )
                     }
                     AxonPage.Home -> {
@@ -402,6 +428,9 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                         TopBar(
                             onMessagesClick = {
                                 currentPage = AxonPage.Inbox
+                            },
+                            onCallsClick = {
+                                currentPage = AxonPage.Calls
                             },
                             onSettingsClick = {
                                 currentPage = AxonPage.Settings
@@ -509,6 +538,7 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
 @Composable
 private fun TopBar(
     onMessagesClick: () -> Unit,
+    onCallsClick: () -> Unit,
     onSettingsClick: () -> Unit
 ) {
     Row(
@@ -549,6 +579,20 @@ private fun TopBar(
                     imageVector = Icons.Rounded.ChatBubbleOutline,
                     contentDescription = "Messages",
                     tint = AxonColor.Cyan
+                )
+            }
+            IconButton(
+                onClick = onCallsClick,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(AxonColor.Panel)
+                    .border(1.dp, AxonColor.Border, RoundedCornerShape(8.dp))
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Phone,
+                    contentDescription = "Calls",
+                    tint = AxonColor.Amber
                 )
             }
             IconButton(
@@ -947,6 +991,305 @@ private fun MediaControlButton(
     }
 }
 
+@Composable
+private fun CallsScreen(
+    calls: List<CallLogEntry>,
+    onBack: () -> Unit,
+    onClearAll: () -> Unit,
+    onDeleteCall: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 14.dp)
+    ) {
+        PageHeader(
+            title = "Calls",
+            subtitle = if (calls.isEmpty()) "No mirrored calls yet" else "${calls.size} recent calls",
+            onBack = onBack,
+            actionIcon = if (calls.isNotEmpty()) Icons.Rounded.DeleteSweep else null,
+            actionContentDescription = "Clear call logs",
+            onAction = onClearAll
+        )
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .padding(top = 18.dp, bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (calls.isEmpty()) {
+                item {
+                    EmptyCalls()
+                }
+            } else {
+                items(calls, key = { it.id }) { call ->
+                    CallLogRow(
+                        call = call,
+                        onDelete = { onDeleteCall(call.id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CallLogPanel(
+    calls: List<CallLogEntry>,
+    onClearAll: () -> Unit,
+    onDeleteCall: (String) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = AxonColor.Panel),
+        border = BorderStroke(1.dp, AxonColor.Border)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Calls",
+                        color = AxonColor.Text,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = if (calls.isEmpty()) "No mirrored calls yet" else "${calls.size} recent calls",
+                        color = AxonColor.Muted,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (calls.isNotEmpty()) {
+                        SmallIconAction(
+                            icon = Icons.Rounded.DeleteSweep,
+                            contentDescription = "Clear call logs",
+                            onClick = onClearAll,
+                            tint = AxonColor.Red
+                        )
+                    }
+                    StatusPill(
+                        text = calls.firstOrNull()?.state?.displayLabel()?.uppercase() ?: "IDLE",
+                        color = calls.firstOrNull()?.state?.statusColor() ?: AxonColor.Muted
+                    )
+                }
+            }
+
+            if (calls.isEmpty()) {
+                Text(
+                    text = "Incoming call alerts will appear here.",
+                    color = AxonColor.Muted,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    calls.take(5).forEach { call ->
+                        CallLogRow(
+                            call = call,
+                            onDelete = { onDeleteCall(call.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyCalls() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 96.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(58.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(AxonColor.Panel)
+                    .border(1.dp, AxonColor.Border, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Phone,
+                    contentDescription = null,
+                    tint = AxonColor.Amber,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+            Text(
+                text = "No calls yet",
+                color = AxonColor.Text,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+            Text(
+                text = "Mirrored call history will appear here.",
+                color = AxonColor.Muted,
+                fontSize = 13.sp,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun CallLogRow(
+    call: CallLogEntry,
+    onDelete: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(AxonColor.PanelRaised)
+            .border(1.dp, AxonColor.Border, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = call.caller,
+                color = AxonColor.Text,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = VazirmatnFontFamily,
+                style = TextStyle(textDirection = TextDirection.ContentOrRtl),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "${call.state.displayLabel()} • ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(call.updatedAt))}",
+                color = AxonColor.Muted,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            StatusPill(
+                text = call.state.displayLabel().uppercase(),
+                color = call.state.statusColor()
+            )
+            SmallIconAction(
+                icon = Icons.Rounded.Delete,
+                contentDescription = "Delete call",
+                onClick = onDelete,
+                tint = AxonColor.Red
+            )
+        }
+    }
+}
+
+@Composable
+private fun SmallIconAction(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    tint: Color = AxonColor.Muted
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .size(34.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(AxonColor.Panel)
+            .border(1.dp, AxonColor.Border, RoundedCornerShape(8.dp))
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun DeleteConfirmationDialog(
+    title: String,
+    message: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = AxonColor.Panel,
+        titleContentColor = AxonColor.Text,
+        textContentColor = AxonColor.Muted,
+        title = {
+            Text(
+                text = title,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        text = {
+            Text(
+                text = message,
+                lineHeight = 20.sp
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(
+                    text = "Delete",
+                    color = AxonColor.Red,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(
+                    text = "Cancel",
+                    color = AxonColor.Text
+                )
+            }
+        }
+    )
+}
+
+private fun CallState.displayLabel(): String {
+    return when (this) {
+        CallState.Ringing -> "Ringing"
+        CallState.InCall -> "In call"
+        CallState.Ended -> "Ended"
+    }
+}
+
+private fun CallState.statusColor(): Color {
+    return when (this) {
+        CallState.Ringing -> AxonColor.Amber
+        CallState.InCall -> AxonColor.Green
+        CallState.Ended -> AxonColor.Muted
+    }
+}
+
 private fun mediaProgress(media: MediaPayload?, updatedAtElapsed: Long): Float {
     if (media == null || media.duration <= 0L) return 0f
     val elapsed = if (media.isPlaying && updatedAtElapsed > 0L) {
@@ -1124,17 +1467,60 @@ private fun DiagnosticsPanel(
 private fun InboxScreen(
     threads: List<SmsThread>,
     onBack: () -> Unit,
-    onThreadClick: (String) -> Unit
+    onThreadClick: (String) -> Unit,
+    onDeleteThreads: (Set<String>) -> Unit
 ) {
+    var selectedThreadIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var isDeleteDialogOpen by remember { mutableStateOf(false) }
+    val isSelecting = selectedThreadIds.isNotEmpty()
+
+    fun toggleThread(threadId: String) {
+        selectedThreadIds = if (threadId in selectedThreadIds) {
+            selectedThreadIds - threadId
+        } else {
+            selectedThreadIds + threadId
+        }
+    }
+
+    BackHandler(enabled = isSelecting) {
+        selectedThreadIds = emptySet()
+    }
+
+    if (isDeleteDialogOpen) {
+        DeleteConfirmationDialog(
+            title = if (selectedThreadIds.size == 1) "Delete conversation?" else "Delete conversations?",
+            message = if (selectedThreadIds.size == 1) {
+                "This conversation will be removed from Axon on this receiver."
+            } else {
+                "${selectedThreadIds.size} conversations will be removed from Axon on this receiver."
+            },
+            onDismiss = { isDeleteDialogOpen = false },
+            onConfirm = {
+                onDeleteThreads(selectedThreadIds)
+                selectedThreadIds = emptySet()
+                isDeleteDialogOpen = false
+            }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 20.dp, vertical = 14.dp)
     ) {
         PageHeader(
-            title = "Messages",
-            subtitle = "${threads.size} conversations",
-            onBack = onBack
+            title = if (isSelecting) "${selectedThreadIds.size} selected" else "Messages",
+            subtitle = if (isSelecting) "Conversations" else "${threads.size} conversations",
+            onBack = {
+                if (isSelecting) {
+                    selectedThreadIds = emptySet()
+                } else {
+                    onBack()
+                }
+            },
+            actionIcon = if (isSelecting) Icons.Rounded.Delete else null,
+            actionContentDescription = "Delete selected conversations",
+            onAction = { isDeleteDialogOpen = true }
         )
 
         if (threads.isEmpty()) {
@@ -1147,7 +1533,19 @@ private fun InboxScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(threads, key = { it.id }) { thread ->
-                    ThreadRow(thread = thread, onClick = { onThreadClick(thread.id) })
+                    ThreadRow(
+                        thread = thread,
+                        selected = thread.id in selectedThreadIds,
+                        selectionMode = isSelecting,
+                        onClick = {
+                            if (isSelecting) {
+                                toggleThread(thread.id)
+                            } else {
+                                onThreadClick(thread.id)
+                            }
+                        },
+                        onLongClick = { toggleThread(thread.id) }
+                    )
                 }
             }
         }
@@ -1158,17 +1556,60 @@ private fun InboxScreen(
 private fun ThreadScreen(
     thread: SmsThread?,
     messages: List<SmsArchiveMessage>,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onDeleteMessages: (Set<String>) -> Unit
 ) {
+    var selectedMessageIds by remember(thread?.id) { mutableStateOf<Set<String>>(emptySet()) }
+    var isDeleteDialogOpen by remember { mutableStateOf(false) }
+    val isSelecting = selectedMessageIds.isNotEmpty()
+
+    fun toggleMessage(messageId: String) {
+        selectedMessageIds = if (messageId in selectedMessageIds) {
+            selectedMessageIds - messageId
+        } else {
+            selectedMessageIds + messageId
+        }
+    }
+
+    BackHandler(enabled = isSelecting) {
+        selectedMessageIds = emptySet()
+    }
+
+    if (isDeleteDialogOpen) {
+        DeleteConfirmationDialog(
+            title = if (selectedMessageIds.size == 1) "Delete message?" else "Delete messages?",
+            message = if (selectedMessageIds.size == 1) {
+                "This message will be removed from Axon on this receiver."
+            } else {
+                "${selectedMessageIds.size} messages will be removed from Axon on this receiver."
+            },
+            onDismiss = { isDeleteDialogOpen = false },
+            onConfirm = {
+                onDeleteMessages(selectedMessageIds)
+                selectedMessageIds = emptySet()
+                isDeleteDialogOpen = false
+            }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 20.dp, vertical = 14.dp)
     ) {
         PageHeader(
-            title = thread?.sender ?: "Messages",
-            subtitle = "${messages.size} received",
-            onBack = onBack
+            title = if (isSelecting) "${selectedMessageIds.size} selected" else thread?.sender ?: "Messages",
+            subtitle = if (isSelecting) "Messages" else "${messages.size} received",
+            onBack = {
+                if (isSelecting) {
+                    selectedMessageIds = emptySet()
+                } else {
+                    onBack()
+                }
+            },
+            actionIcon = if (isSelecting) Icons.Rounded.Delete else null,
+            actionContentDescription = "Delete selected messages",
+            onAction = { isDeleteDialogOpen = true }
         )
 
         LazyColumn(
@@ -1178,7 +1619,17 @@ private fun ThreadScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(messages, key = { it.id }) { message ->
-                MessageBubble(message)
+                MessageBubble(
+                    message = message,
+                    selected = message.id in selectedMessageIds,
+                    selectionMode = isSelecting,
+                    onClick = {
+                        if (isSelecting) {
+                            toggleMessage(message.id)
+                        }
+                    },
+                    onLongClick = { toggleMessage(message.id) }
+                )
             }
         }
     }
@@ -1188,7 +1639,10 @@ private fun ThreadScreen(
 private fun PageHeader(
     title: String,
     subtitle: String,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    actionIcon: ImageVector? = null,
+    actionContentDescription: String = "",
+    onAction: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1220,35 +1674,72 @@ private fun PageHeader(
             }
         }
         Spacer(Modifier.width(12.dp))
-        IconButton(
-            onClick = onBack,
-            modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(AxonColor.PanelRaised)
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                contentDescription = "Back",
-                tint = AxonColor.Text
-            )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (actionIcon != null && onAction != null) {
+                IconButton(
+                    onClick = onAction,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(AxonColor.PanelRaised)
+                ) {
+                    Icon(
+                        imageVector = actionIcon,
+                        contentDescription = actionContentDescription,
+                        tint = AxonColor.Red
+                    )
+                }
+            }
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(AxonColor.PanelRaised)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = "Back",
+                    tint = AxonColor.Text
+                )
+            }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ThreadRow(thread: SmsThread, onClick: () -> Unit) {
+private fun ThreadRow(
+    thread: SmsThread,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (thread.unreadCount > 0) AxonColor.PanelRaised else AxonColor.Panel)
+            .background(
+                when {
+                    selected -> AxonColor.Cyan.copy(alpha = 0.16f)
+                    thread.unreadCount > 0 -> AxonColor.PanelRaised
+                    else -> AxonColor.Panel
+                }
+            )
             .border(
                 1.dp,
-                if (thread.unreadCount > 0) AxonColor.Cyan.copy(alpha = 0.45f) else AxonColor.Border,
+                when {
+                    selected -> AxonColor.Cyan
+                    thread.unreadCount > 0 -> AxonColor.Cyan.copy(alpha = 0.45f)
+                    else -> AxonColor.Border
+                },
                 RoundedCornerShape(8.dp)
             )
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1299,7 +1790,23 @@ private fun ThreadRow(thread: SmsThread, onClick: () -> Unit) {
                 overflow = TextOverflow.Ellipsis
             )
         }
-        if (thread.unreadCount > 0) {
+        if (selected) {
+            Spacer(Modifier.width(10.dp))
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(AxonColor.Cyan),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.CheckCircle,
+                    contentDescription = null,
+                    tint = Color(0xFF031516),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        } else if (!selectionMode && thread.unreadCount > 0) {
             Spacer(Modifier.width(10.dp))
             Box(
                 modifier = Modifier
@@ -1320,18 +1827,34 @@ private fun ThreadRow(thread: SmsThread, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(message: SmsArchiveMessage) {
+private fun MessageBubble(
+    message: SmsArchiveMessage,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         horizontalArrangement = Arrangement.Start
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.9f)
                 .clip(RoundedCornerShape(8.dp))
-                .background(AxonColor.Panel)
-                .border(1.dp, AxonColor.Border, RoundedCornerShape(8.dp))
+                .background(if (selected) AxonColor.Cyan.copy(alpha = 0.16f) else AxonColor.Panel)
+                .border(
+                    1.dp,
+                    if (selected) AxonColor.Cyan else AxonColor.Border,
+                    RoundedCornerShape(8.dp)
+                )
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -1363,6 +1886,15 @@ private fun MessageBubble(message: SmsArchiveMessage) {
                     fontSize = 11.sp,
                     maxLines = 1
                 )
+                if (selected) {
+                    Spacer(Modifier.width(8.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.CheckCircle,
+                        contentDescription = null,
+                        tint = AxonColor.Cyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }

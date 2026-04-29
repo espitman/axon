@@ -14,6 +14,7 @@ import com.axon.bridge.CallActivity
 import com.axon.bridge.MainActivity
 import com.axon.bridge.R
 import com.axon.bridge.data.DiagnosticsLog
+import com.axon.bridge.domain.CallState
 import com.axon.bridge.domain.NotificationCategory
 import com.axon.bridge.domain.NotificationPayload
 import kotlin.math.absoluteValue
@@ -76,7 +77,7 @@ class MirroredNotificationManager(
                 }
             )
             .setLocalOnly(false)
-            .setOngoing(payload.category == NotificationCategory.Call)
+            .setOngoing(payload.category == NotificationCategory.Call && payload.callState != CallState.Ended)
             .setAutoCancel(payload.category != NotificationCategory.Call)
             .setWhen(payload.postedTime)
             .setShowWhen(true)
@@ -94,6 +95,13 @@ class MirroredNotificationManager(
             DiagnosticsLog.add("Displayed mirrored ${payload.category.name}: ${payload.title}")
         }.onFailure { error ->
             DiagnosticsLog.add("Display failed: ${error.message ?: error::class.simpleName}")
+        }
+    }
+
+    fun cancel(payload: NotificationPayload) {
+        NotificationManagerCompat.from(context).apply {
+            cancel(notificationId(payload))
+            cancel(legacyNotificationId(payload))
         }
     }
 
@@ -138,6 +146,10 @@ class MirroredNotificationManager(
         private const val CALL_CHANNEL_ID = "mirrored_incoming_calls"
 
         fun notificationId(payload: NotificationPayload): Int {
+            return payload.id.hashCode().absoluteValue
+        }
+
+        fun legacyNotificationId(payload: NotificationPayload): Int {
             return "${payload.packageName}|${payload.title}".hashCode().absoluteValue
         }
     }

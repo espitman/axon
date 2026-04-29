@@ -40,10 +40,22 @@ data class HomeState(
     val permissions: List<PermissionStatus> = emptyList(),
     val diagnostics: List<String> = emptyList(),
     val smsThreads: List<SmsThread> = emptyList(),
+    val callLogs: List<CallLogEntry> = emptyList(),
     val activeCall: NotificationPayload? = null,
     val activeMedia: MediaPayload? = null,
     val activeMediaUpdatedAtElapsed: Long = 0L,
     val isScanningReceivers: Boolean = false,
     val discoveredReceivers: List<DiscoveredReceiver> = emptyList(),
     val errorMessage: String? = null
+)
+
+@kotlinx.serialization.Serializable
+data class CallLogEntry(
+    val id: String,
+    val caller: String,
+    val message: String,
+    val originDevice: String,
+    val startedAt: Long,
+    val updatedAt: Long,
+    val state: CallState
 )

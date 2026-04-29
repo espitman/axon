@@ -6,6 +6,7 @@ import android.service.notification.StatusBarNotification
 import com.axon.bridge.data.DeviceInfoProvider
 import com.axon.bridge.data.DiagnosticsLog
 import com.axon.bridge.data.NotificationEventBus
+import com.axon.bridge.domain.CallState
 import com.axon.bridge.domain.NotificationCategory
 import com.axon.bridge.domain.NotificationPayload
 import kotlin.math.absoluteValue
@@ -44,7 +45,7 @@ class AxonNotificationListenerService : NotificationListenerService() {
             return
         }
 
-        val stableId = "${sbn.packageName}|$displayTitle|$category".hashCode().absoluteValue.toString()
+        val stableId = stableId(sbn.packageName, displayTitle, category)
         DiagnosticsLog.add("Queued mirrored ${category.name}: $displayTitle")
         NotificationEventBus.publish(
             NotificationPayload(
@@ -54,7 +55,29 @@ class AxonNotificationListenerService : NotificationListenerService() {
                 title = displayTitle,
                 message = displayMessage,
                 packageName = sbn.packageName,
-                postedTime = sbn.postTime
+                postedTime = sbn.postTime,
+                callState = if (category == NotificationCategory.Call) CallState.Ringing else null
+            )
+        )
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        val category = sbn.packageName.toNotificationCategory() ?: return
+        if (category != NotificationCategory.Call) return
+        val extras = sbn.notification.extras
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+        val displayTitle = title.ifBlank { "Incoming call" }
+        DiagnosticsLog.add("Queued mirrored Call ended: $displayTitle")
+        NotificationEventBus.publish(
+            NotificationPayload(
+                id = stableId(sbn.packageName, displayTitle, category),
+                category = category,
+                originDevice = deviceInfoProvider.currentDevice().displayName,
+                title = displayTitle,
+                message = "Call ended",
+                packageName = sbn.packageName,
+                postedTime = System.currentTimeMillis(),
+                callState = CallState.Ended
             )
         )
     }
@@ -77,5 +100,13 @@ class AxonNotificationListenerService : NotificationListenerService() {
             "com.google.android.apps.tachyon" -> NotificationCategory.Call
             else -> null
         }
+    }
+
+    private fun stableId(
+        packageName: String,
+        title: String,
+        category: NotificationCategory
+    ): String {
+        return "$packageName|$title|$category".hashCode().absoluteValue.toString()
     }
 }

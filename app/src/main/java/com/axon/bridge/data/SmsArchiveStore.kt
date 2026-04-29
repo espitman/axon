@@ -69,6 +69,36 @@ object SmsArchiveStore {
         save(context, next)
     }
 
+    fun deleteMessage(context: Context, messageId: String) {
+        init(context)
+        val next = mutableMessages.value.filterNot { it.id == messageId }
+        mutableMessages.value = next
+        save(context, next)
+    }
+
+    fun deleteMessages(context: Context, messageIds: Set<String>) {
+        if (messageIds.isEmpty()) return
+        init(context)
+        val next = mutableMessages.value.filterNot { it.id in messageIds }
+        mutableMessages.value = next
+        save(context, next)
+    }
+
+    fun deleteThread(context: Context, threadId: String) {
+        init(context)
+        val next = mutableMessages.value.filterNot { it.threadId == threadId }
+        mutableMessages.value = next
+        save(context, next)
+    }
+
+    fun deleteThreads(context: Context, threadIds: Set<String>) {
+        if (threadIds.isEmpty()) return
+        init(context)
+        val next = mutableMessages.value.filterNot { it.threadId in threadIds }
+        mutableMessages.value = next
+        save(context, next)
+    }
+
     fun threads(): List<SmsThread> {
         return mutableMessages.value
             .groupBy { it.threadId }

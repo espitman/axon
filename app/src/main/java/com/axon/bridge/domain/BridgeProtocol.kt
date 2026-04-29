@@ -59,7 +59,8 @@ data class NotificationPayload(
     val title: String,
     val message: String,
     val packageName: String,
-    val postedTime: Long
+    val postedTime: Long,
+    val callState: CallState? = null
 )
 
 @Serializable
@@ -103,4 +104,16 @@ enum class NotificationCategory {
 
     @SerialName("CALL")
     Call
+}
+
+@Serializable
+enum class CallState {
+    @SerialName("RINGING")
+    Ringing,
+
+    @SerialName("IN_CALL")
+    InCall,
+
+    @SerialName("ENDED")
+    Ended
 }

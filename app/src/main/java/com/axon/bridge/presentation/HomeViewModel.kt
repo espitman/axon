@@ -63,6 +63,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         SmsArchiveStore.init(appContext)
+        CallAlertStore.init(appContext)
         DiagnosticsLog.onEntryAdded = { refresh() }
         ContextCompat.registerReceiver(
             appContext,
@@ -77,6 +78,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             CallAlertStore.activeCall.collect {
+                refresh()
+            }
+        }
+        viewModelScope.launch {
+            CallAlertStore.calls.collect {
                 refresh()
             }
         }
@@ -196,8 +202,46 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         refresh()
     }
 
+    fun deleteSmsMessage(messageId: String) {
+        SmsArchiveStore.deleteMessage(appContext, messageId)
+        DiagnosticsLog.add("Deleted SMS message")
+        refresh()
+    }
+
+    fun deleteSmsMessages(messageIds: Set<String>) {
+        if (messageIds.isEmpty()) return
+        SmsArchiveStore.deleteMessages(appContext, messageIds)
+        DiagnosticsLog.add("Deleted ${messageIds.size} SMS message(s)")
+        refresh()
+    }
+
+    fun deleteSmsThread(threadId: String) {
+        SmsArchiveStore.deleteThread(appContext, threadId)
+        DiagnosticsLog.add("Deleted SMS thread")
+        refresh()
+    }
+
+    fun deleteSmsThreads(threadIds: Set<String>) {
+        if (threadIds.isEmpty()) return
+        SmsArchiveStore.deleteThreads(appContext, threadIds)
+        DiagnosticsLog.add("Deleted ${threadIds.size} SMS thread(s)")
+        refresh()
+    }
+
     fun dismissActiveCall() {
-        CallAlertStore.clear()
+        CallAlertStore.clearActive()
+        refresh()
+    }
+
+    fun deleteCallLog(callId: String) {
+        CallAlertStore.delete(appContext, callId)
+        DiagnosticsLog.add("Deleted call log")
+        refresh()
+    }
+
+    fun clearCallLogs() {
+        CallAlertStore.clear(appContext)
+        DiagnosticsLog.add("Cleared call logs")
         refresh()
     }
 
@@ -246,6 +290,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             permissions = permissionStatuses(role),
             diagnostics = DiagnosticsLog.entries.value,
             smsThreads = SmsArchiveStore.threads(),
+            callLogs = CallAlertStore.calls.value,
             activeCall = CallAlertStore.activeCall.value,
             activeMedia = BridgeService.activeMedia.value,
             activeMediaUpdatedAtElapsed = BridgeService.activeMediaUpdatedAtElapsed.value,

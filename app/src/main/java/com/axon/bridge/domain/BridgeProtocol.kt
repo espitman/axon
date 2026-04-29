@@ -72,7 +72,8 @@ data class MediaPayload(
     val playbackSpeed: Float,
     val isPlaying: Boolean,
     val lastPositionUpdateTime: Long,
-    val packageName: String
+    val packageName: String,
+    val artworkBase64: String? = null
 )
 
 @Serializable

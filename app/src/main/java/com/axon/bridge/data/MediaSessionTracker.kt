@@ -2,6 +2,7 @@ package com.axon.bridge.data
 
 import android.content.ComponentName
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
@@ -9,10 +10,12 @@ import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Base64
 import com.axon.bridge.domain.MediaCommandAction
 import com.axon.bridge.domain.MediaCommandPayload
 import com.axon.bridge.domain.MediaPayload
 import com.axon.bridge.service.AxonNotificationListenerService
+import java.io.ByteArrayOutputStream
 
 class MediaSessionTracker(
     context: Context,
@@ -146,7 +149,8 @@ class MediaSessionTracker(
             payload.duration,
             payload.position,
             payload.playbackSpeed,
-            payload.isPlaying
+            payload.isPlaying,
+            payload.artworkBase64?.hashCode()
         ).joinToString("|")
 
         if (signature == lastPayloadSignature) return
@@ -178,6 +182,7 @@ class MediaSessionTracker(
         val speed = state?.playbackSpeed ?: 0f
         val isPlaying = state?.state == PlaybackState.STATE_PLAYING
         val updateTime = state?.lastPositionUpdateTime?.takeIf { it > 0L } ?: SystemClock.elapsedRealtime()
+        val artworkBase64 = metadata.extractArtworkBase64()
 
         return MediaPayload(
             title = title,
@@ -188,7 +193,39 @@ class MediaSessionTracker(
             playbackSpeed = speed,
             isPlaying = isPlaying,
             lastPositionUpdateTime = updateTime,
-            packageName = packageName
+            packageName = packageName,
+            artworkBase64 = artworkBase64
         )
+    }
+
+    private fun MediaMetadata.extractArtworkBase64(): String? {
+        val bitmap = getBitmap(MediaMetadata.METADATA_KEY_ART)
+            ?: getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+            ?: getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+            ?: return null
+
+        return runCatching {
+            val scaled = bitmap.scaleToMax(ARTWORK_MAX_SIZE)
+            val output = ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, ARTWORK_QUALITY, output)
+            Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+        }.getOrNull()
+    }
+
+    private fun Bitmap.scaleToMax(maxSize: Int): Bitmap {
+        val largestSide = maxOf(width, height)
+        if (largestSide <= maxSize) return this
+        val scale = maxSize.toFloat() / largestSide.toFloat()
+        return Bitmap.createScaledBitmap(
+            this,
+            (width * scale).toInt().coerceAtLeast(1),
+            (height * scale).toInt().coerceAtLeast(1),
+            true
+        )
+    }
+
+    private companion object {
+        const val ARTWORK_MAX_SIZE = 384
+        const val ARTWORK_QUALITY = 82
     }
 }

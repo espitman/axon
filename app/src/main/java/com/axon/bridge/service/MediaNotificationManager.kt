@@ -7,8 +7,11 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.session.MediaSession
 import android.os.Build
+import android.util.Base64
 import androidx.core.content.ContextCompat
 import com.axon.bridge.MainActivity
 import com.axon.bridge.R
@@ -44,6 +47,7 @@ class MediaNotificationManager(
             .setContentText(payload.artist.ifBlank { payload.packageName })
             .setSubText("Axon media")
             .setContentIntent(contentIntent)
+            .setLargeIcon(payload.decodeArtwork())
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setOngoing(payload.isPlaying)
@@ -112,6 +116,14 @@ class MediaNotificationManager(
             setShowBadge(false)
         }
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    private fun MediaPayload.decodeArtwork(): Bitmap? {
+        val encoded = artworkBase64 ?: return null
+        return runCatching {
+            val bytes = Base64.decode(encoded, Base64.NO_WRAP)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }.getOrNull()
     }
 
     private companion object {

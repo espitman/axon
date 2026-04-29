@@ -1,93 +1,256 @@
-Technical Specification: DroidBridge P2P (Phase 2 - Media Integration)
-1. Project Extension Overview
-Phase 2 extends the existing WebSocket tunnel to support Bi-directional Media Synchronization. The goal is to mirror the playback state of the Source Device (Xiaomi) to the Sink Device (Pixel) and allow the Pixel (and its connected Watch) to remotely control the media transport (Play, Pause, Next, Previous).
+# Axon Phase 2 - Media Integration Specification
 
-2. Functional Requirements
-A. Media Mirroring (Source to Sink)
-Active Session Tracking: The Client must monitor the system for the primary active MediaSession.
+## Goal
 
-Metadata Extraction: Real-time extraction of track Title, Artist, Album, Duration, and Current Position.
+Phase 2 extends the local Sender/Receiver bridge with bidirectional media synchronization.
 
-Playback State Monitoring: Detection of state changes (Playing, Paused, Buffering, Stopped).
+The Sender tracks the currently active Android media session and sends playback metadata to the Receiver. The Receiver reconstructs that state as a local shadow media experience so the Receiver phone and its connected watch can display the current track and send transport commands back to the Sender.
 
-B. Remote Control (Sink to Source)
-Command Dispatch: The Sink device must translate UI/Notification actions into commands and send them back via WebSocket.
+Security is still intentionally out of scope for this phase.
 
-Media Injection: The Sink must maintain a "Shadow MediaSession" to ensure the Smartwatch displays the media controller UI.
+## Roles
 
-3. Detailed Technical Requirements
-3.1 Media Session Interception (Client/Source)
-Service: Utilize MediaSessionManager.OnActiveSessionsChangedListener.
+- Sender: the Android phone that owns the real media playback session.
+- Receiver: the Android phone that receives media updates, displays the mirrored media state, exposes media controls, and forwards commands back to the Sender.
+- Watch: a device connected to the Receiver through Android's normal notification/media-session pipeline or through a companion app.
 
-Logic: * Identify the top-priority active session (e.g., Spotify, YouTube).
+## Functional Requirements
 
-Attach a MediaController.Callback to the active session.
+### Media Mirroring
 
-Throttling: Do NOT stream the "Current Position" every millisecond. Instead, send a MediaPayload only when:
+The Sender must:
 
-The track changes.
+- Monitor active Android media sessions.
+- Pick the highest-priority playable session, preferring sessions whose playback state is `STATE_PLAYING`.
+- Extract title, artist, album, duration, position, playback speed, playing state, package name, and artwork.
+- Send media updates only when meaningful state changes occur.
+- Send a media-clear event when playback disappears or the active session is destroyed.
 
-The playback state changes (Play -> Pause).
+The Receiver must:
 
-A manual "seek" occurs.
+- Store the latest active media payload in app state.
+- Render a media panel in the app.
+- Show a media-style notification.
+- Maintain a shadow media session that the Android system and connected watch can discover.
+- Keep artwork available in both the app UI and the media notification.
 
-Payload Calculation: Include lastUpdateTime (SystemClock.elapsedRealtime) so the Sink can locally extrapolate the seek bar progress.
+### Remote Commands
 
-3.2 Media Style Notification (Server/Sink)
-Implementation: Use androidx.media.app.NotificationCompat.MediaStyle.
+The Receiver must translate local UI, notification, watch, and media-session controls into protocol commands:
 
-MediaSession Reconstruction: The Sink must create its own MediaSession instance.
+- `PLAY`
+- `PAUSE`
+- `SKIP_TO_NEXT`
+- `SKIP_TO_PREVIOUS`
 
-This session doesn't play audio; it acts as a Proxy.
+The Sender must dispatch those commands to the real active media session through `MediaController.TransportControls`.
 
-Update this proxy session with metadata received from the Client.
+## Protocol Messages
 
-Watch Integration: Setting the MediaSession to isActive = true on the Pixel will automatically trigger the "Now Playing" controller on the connected Wear OS watch.
+### `MEDIA_UPDATE`
 
-3.3 Command Back-channel
-When the user clicks "Next" on the Smartwatch:
-
-The Pixel’s MediaSession.Callback receives onSkipToNext().
-
-The Server sends a {"type": "MEDIA_COMMAND", "action": "SKIP_TO_NEXT"} JSON through the WebSocket.
-
-The Xiaomi Client receives the JSON and calls mediaController.transportControls.skipToNext().
-
-4. Extended Data Schema (JSON)
-JSON
+```json
 {
   "type": "MEDIA_UPDATE",
-  "payload": {
+  "media": {
     "title": "String",
     "artist": "String",
     "album": "String",
-    "duration": Long,
-    "position": Long,
-    "playbackSpeed": Float,
-    "isPlaying": Boolean,
-    "lastPositionUpdateTime": Long,
-    "packageName": "String"
+    "duration": 0,
+    "position": 0,
+    "playbackSpeed": 1.0,
+    "isPlaying": true,
+    "lastPositionUpdateTime": 0,
+    "packageName": "String",
+    "artworkBase64": "Base64 JPEG or null"
   }
 }
+```
 
+### `MEDIA_COMMAND`
+
+```json
 {
   "type": "MEDIA_COMMAND",
-  "action": "PLAY | PAUSE | SKIP_TO_NEXT | SKIP_TO_PREVIOUS"
+  "command": {
+    "action": "PLAY | PAUSE | SKIP_TO_NEXT | SKIP_TO_PREVIOUS"
+  }
 }
-5. Logic for Seek-Bar Synchronization
-To avoid high network traffic, use the Reference Point Formula:
+```
 
-Client sends: position: 45000ms, timestamp: 1000500ms.
+### `MEDIA_CLEAR`
 
-Server calculates local display: currentDisplayPos = 45000 + (SystemClock.elapsedRealtime() - 1000500).
+```json
+{
+  "type": "MEDIA_CLEAR"
+}
+```
 
-This ensures the seek bar on the watch moves smoothly without constant updates over the air.
+## Sender Implementation
 
-6. Instructions for the AI Assistant (Codex/Cursor)
-MediaController Integration: In the Client role, use MediaSessionManager to retrieve the MediaController for the active app.
+The Sender uses `MediaSessionManager` and `MediaController.Callback`.
 
-Callback Management: Ensure callbacks are properly unRegistered when the WebSocket disconnects or the active app changes to prevent memory leaks.
+Implementation file:
 
-Proxy Session: On the Server side, the MediaSession should have MediaSession.Token linked to the MediaStyle notification.
+- `app/src/main/java/com/axon/bridge/data/MediaSessionTracker.kt`
 
-Error Handling: Handle cases where the Client has multiple media apps open (prioritize the one with PlaybackState.STATE_PLAYING).
+Main behavior:
+
+- Registers `MediaSessionManager.OnActiveSessionsChangedListener`.
+- Uses the notification listener component when calling `getActiveSessions`.
+- Selects a playing session first, then falls back to the first available session.
+- Registers a callback on the selected `MediaController`.
+- Publishes updates when metadata or playback state changes.
+- Encodes artwork as a bounded JPEG payload before transport.
+- Dispatches received commands through `transportControls`.
+
+## Receiver Implementation
+
+### Shadow Media Session
+
+The Receiver uses `MediaSessionCompat`, not only framework `MediaSession`.
+
+Implementation file:
+
+- `app/src/main/java/com/axon/bridge/data/ShadowMediaSession.kt`
+
+Reason:
+
+- Some watch companion stacks query compat media sessions using commands such as `android.support.v4.media.session.command.GET_EXTRA_BINDER`.
+- A plain framework `MediaSession` can show metadata on the watch but may not expose the compat binder path that the watch expects for controls.
+
+Main behavior:
+
+- Creates a `MediaSessionCompat` tagged `AxonShadowMediaSession`.
+- Sets callbacks for play, pause, next, previous, and media-button events.
+- Publishes Axon `MediaCommandPayload` values into the command bus.
+- Updates metadata and playback state from incoming `MediaPayload`.
+- Keeps the session active while media is available.
+- Links the session token to the media-style notification.
+
+### Silent Playback Anchor
+
+Implementation file:
+
+- `app/src/main/java/com/axon/bridge/data/SilentPlaybackAnchor.kt`
+
+Reason:
+
+- Some watches show a shadow media session but do not route play/pause/next/previous to it unless the Receiver is also perceived by Android as an active media playback source.
+- The Receiver is not playing real user audio, so Axon starts a zero-volume `AudioTrack` while mirrored media is active.
+
+Behavior:
+
+- Creates a stream-mode mono PCM `AudioTrack`.
+- Uses media audio attributes.
+- Sets volume to `0f`.
+- Continuously writes silence while shadow media is active.
+- Stops and releases the track when media is cleared or the bridge stops.
+
+This was the final fix that made watch controls route back into Axon's Receiver-side media session.
+
+### Media Notification
+
+Implementation file:
+
+- `app/src/main/java/com/axon/bridge/service/MediaNotificationManager.kt`
+
+Main behavior:
+
+- Uses `NotificationCompat.Builder`.
+- Uses `androidx.media.app.NotificationCompat.MediaStyle`.
+- Attaches the `MediaSessionCompat.Token`.
+- Shows previous, play/pause, and next actions.
+- Builds notification actions through media-button pending intents so notification/watch controls enter the media-session path.
+- Shows artwork as the notification large icon.
+
+### Media Button Receiver
+
+Implementation file:
+
+- `app/src/main/java/com/axon/bridge/service/AxonMediaButtonReceiver.kt`
+
+Main behavior:
+
+- Receives `android.intent.action.MEDIA_BUTTON`.
+- First routes the intent into the active `MediaSessionCompat` through `MediaButtonReceiver.handleIntent`.
+- Falls back to manual `KeyEvent` parsing if no active compat session exists.
+
+Manifest entry:
+
+```xml
+<receiver
+    android:name=".service.AxonMediaButtonReceiver"
+    android:exported="true">
+    <intent-filter>
+        <action android:name="android.intent.action.MEDIA_BUTTON" />
+    </intent-filter>
+</receiver>
+```
+
+## Transport Integration
+
+Implementation file:
+
+- `app/src/main/java/com/axon/bridge/data/BridgeTransport.kt`
+
+Main behavior:
+
+- Sender sends `MEDIA_UPDATE` and `MEDIA_CLEAR`.
+- Receiver sends `MEDIA_COMMAND`.
+- Both directions reuse the existing WebSocket connection.
+- Media commands are collected from `MediaBridgeBus.commands`.
+
+## Important Diagnostics
+
+Expected useful logs:
+
+- `Media tracker starting`
+- `Media session selected: <package>`
+- `Media state: <title> (playing)`
+- `Sent media: <title>`
+- `Media update received: <title>`
+- `Shadow media session ready`
+- `Shadow media updated: <title>`
+- `Shadow media audio focus: granted`
+- `Silent media anchor started`
+- `Shadow media command: Pause`
+- `Sent media command: Pause`
+- `Media command received: Pause`
+- `Media command dispatched: Pause`
+
+If the watch shows the track but no command logs appear, inspect whether the Receiver is actually exposing an active media session and whether the silent playback anchor started.
+
+## Build Notes
+
+The working implementation currently uses the AndroidX media AAR from the local Gradle cache:
+
+```kotlin
+implementation(files("/Users/espitman/.gradle/caches/modules-2/files-2.1/androidx.media/media/1.7.0/36fc8f204b2e3aa1b2355d4d0f43ef42cb6d2c82/media-1.7.0.aar"))
+```
+
+This was used because this development environment failed to resolve `androidx.media:media:1.7.0` from the configured remote Maven repositories, while the AAR was already present locally.
+
+Before sharing the project with another machine or CI environment, replace this with a portable dependency strategy.
+
+## Verification
+
+Manual verification flow:
+
+1. Install the APK on both Android phones.
+2. Start the Receiver bridge.
+3. Start the Sender bridge and connect to the Receiver.
+4. Start music playback on the Sender.
+5. Confirm the Receiver app shows the correct title, artist, state, and artwork.
+6. Confirm Receiver app controls pause, play, next, and previous on the Sender.
+7. Confirm the watch connected to the Receiver shows the mirrored media state.
+8. Press pause, play, next, and previous on the watch.
+9. Confirm the Sender playback changes.
+10. Confirm Receiver Diagnostics include the shadow media command and sent command logs.
+
+## Known Constraints
+
+- Axon does not transfer audio. It transfers metadata and control commands only.
+- The silent playback anchor is only used to make Android and watch companion stacks route media controls to Axon.
+- The Receiver should stop the silent anchor when media is cleared, the bridge stops, or the service is destroyed.
+- Watch behavior can vary by vendor companion app. If controls regress, inspect `dumpsys media_session` and `logcat` on the Receiver before changing the protocol.

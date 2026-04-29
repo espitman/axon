@@ -50,6 +50,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -1708,15 +1709,24 @@ private fun ReceiverDiscoveryDialog(
             )
 
             if (receivers.isNotEmpty()) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    receivers.forEach { receiver ->
-                        ReceiverCandidateRow(
-                            receiver = receiver,
-                            onClick = { onReceiverSelected(receiver) }
-                        )
+                if (receivers.size == 1) {
+                    ReceiverCandidateRow(
+                        receiver = receivers.first(),
+                        onClick = { onReceiverSelected(receivers.first()) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(receivers) { receiver ->
+                            ReceiverCandidateRow(
+                                receiver = receiver,
+                                onClick = { onReceiverSelected(receiver) },
+                                modifier = Modifier.width(236.dp)
+                            )
+                        }
                     }
                 }
             } else if (!isScanning) {
@@ -1826,53 +1836,60 @@ private fun ManualReceiverIpSheet(
 @Composable
 private fun ReceiverCandidateRow(
     receiver: DiscoveredReceiver,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
+    Column(
+        modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .background(AxonColor.PanelRaised)
             .border(1.dp, AxonColor.Cyan.copy(alpha = 0.42f), RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(AxonColor.Cyan.copy(alpha = 0.13f)),
-            contentAlignment = Alignment.Center
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = Icons.Rounded.Smartphone,
-                contentDescription = null,
-                tint = AxonColor.Cyan,
-                modifier = Modifier.size(24.dp)
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = receiver.deviceName,
-                color = AxonColor.Text,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "${receiver.ip}:${receiver.port}",
-                color = AxonColor.Muted,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(AxonColor.Cyan.copy(alpha = 0.13f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Smartphone,
+                    contentDescription = null,
+                    tint = AxonColor.Cyan,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = receiver.deviceName,
+                    color = AxonColor.Text,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${receiver.ip}:${receiver.port}",
+                    color = AxonColor.Muted,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
         Button(
             onClick = onClick,
-            modifier = Modifier.height(36.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(38.dp),
             shape = RoundedCornerShape(8.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = AxonColor.Cyan,

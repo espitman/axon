@@ -9,10 +9,14 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.media.session.MediaSession
 import android.os.Build
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Base64
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.media.session.MediaButtonReceiver
 import com.axon.bridge.MainActivity
 import com.axon.bridge.R
 import com.axon.bridge.data.DiagnosticsLog
@@ -22,7 +26,7 @@ import com.axon.bridge.domain.MediaPayload
 class MediaNotificationManager(
     private val context: Context
 ) {
-    fun show(payload: MediaPayload, token: MediaSession.Token) {
+    fun show(payload: MediaPayload, token: MediaSessionCompat.Token) {
         if (!canPostNotifications()) {
             DiagnosticsLog.add("Cannot show media notification: app notifications denied")
             return
@@ -41,31 +45,31 @@ class MediaNotificationManager(
             notificationAction(MediaCommandAction.Play, "Play")
         }
 
-        val notification = Notification.Builder(context, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_axon_mark)
             .setContentTitle(payload.title.ifBlank { "Unknown track" })
             .setContentText(payload.artist.ifBlank { payload.packageName })
             .setSubText("Axon media")
             .setContentIntent(contentIntent)
             .setLargeIcon(payload.decodeArtwork())
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .setCategory(Notification.CATEGORY_TRANSPORT)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setOngoing(payload.isPlaying)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
+            .setLocalOnly(false)
             .addAction(notificationAction(MediaCommandAction.SkipToPrevious, "Previous"))
             .addAction(playPauseAction)
             .addAction(notificationAction(MediaCommandAction.SkipToNext, "Next"))
             .setStyle(
-                Notification.MediaStyle()
+                androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(token)
                     .setShowActionsInCompactView(0, 1, 2)
             )
             .build()
 
         runCatching {
-            context.getSystemService(NotificationManager::class.java)
-                .notify(NOTIFICATION_ID, notification)
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
         }.onSuccess {
             DiagnosticsLog.add("Displayed media notification: ${payload.title.ifBlank { "Unknown track" }}")
         }.onFailure { error ->
@@ -74,26 +78,30 @@ class MediaNotificationManager(
     }
 
     fun cancel() {
-        context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
     }
 
     private fun notificationAction(
         action: MediaCommandAction,
         title: String
-    ): Notification.Action {
-        @Suppress("DEPRECATION")
-        return Notification.Action.Builder(
+    ): NotificationCompat.Action {
+        return NotificationCompat.Action.Builder(
             R.drawable.ic_axon_mark,
             title,
-            PendingIntent.getService(
+            MediaButtonReceiver.buildMediaButtonPendingIntent(
                 context,
-                action.ordinal + REQUEST_ACTION_BASE,
-                Intent(context, BridgeService::class.java)
-                    .setAction(BridgeService.ACTION_MEDIA_COMMAND)
-                    .putExtra(BridgeService.EXTRA_MEDIA_COMMAND, action.name),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                action.playbackStateAction()
             )
         ).build()
+    }
+
+    private fun MediaCommandAction.playbackStateAction(): Long {
+        return when (this) {
+            MediaCommandAction.Play -> PlaybackStateCompat.ACTION_PLAY
+            MediaCommandAction.Pause -> PlaybackStateCompat.ACTION_PAUSE
+            MediaCommandAction.SkipToNext -> PlaybackStateCompat.ACTION_SKIP_TO_NEXT
+            MediaCommandAction.SkipToPrevious -> PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+        }
     }
 
     private fun canPostNotifications(): Boolean {
@@ -130,6 +138,5 @@ class MediaNotificationManager(
         const val CHANNEL_ID = "axon_media"
         const val NOTIFICATION_ID = 20_001
         const val REQUEST_CONTENT = 20_101
-        const val REQUEST_ACTION_BASE = 20_200
     }
 }

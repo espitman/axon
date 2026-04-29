@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
+import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
 import com.axon.bridge.R
 import com.axon.bridge.data.BridgeTransport
@@ -109,6 +110,14 @@ class BridgeService : Service() {
                 handleMediaCommand(intent)
                 return START_STICKY
             }
+            ACTION_MEDIA_TOGGLE -> {
+                handleMediaToggle()
+                return START_STICKY
+            }
+            Intent.ACTION_MEDIA_BUTTON -> {
+                handleMediaButton(intent)
+                return START_STICKY
+            }
             else -> startBridge(intent)
         }
         return START_STICKY
@@ -190,6 +199,39 @@ class BridgeService : Service() {
         MediaBridgeBus.publishCommand(MediaCommandPayload(action))
     }
 
+    private fun handleMediaToggle() {
+        val action = if (mutableActiveMedia.value?.isPlaying == true) {
+            MediaCommandAction.Pause
+        } else {
+            MediaCommandAction.Play
+        }
+        DiagnosticsLog.add("Media toggle command: $action")
+        MediaBridgeBus.publishCommand(MediaCommandPayload(action))
+    }
+
+    private fun handleMediaButton(intent: Intent) {
+        val event = if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
+        } ?: return
+        if (event.action != KeyEvent.ACTION_DOWN) return
+
+        val action = when (event.keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY -> MediaCommandAction.Play
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> MediaCommandAction.Pause
+            KeyEvent.KEYCODE_MEDIA_NEXT -> MediaCommandAction.SkipToNext
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> MediaCommandAction.SkipToPrevious
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                if (mutableActiveMedia.value?.isPlaying == true) MediaCommandAction.Pause else MediaCommandAction.Play
+            }
+            else -> return
+        }
+        DiagnosticsLog.add("Media button command: $action")
+        MediaBridgeBus.publishCommand(MediaCommandPayload(action))
+    }
+
     private fun publishMedia(payload: MediaPayload) {
         mutableActiveMedia.value = payload
         mutableActiveMediaUpdatedAtElapsed.value = SystemClock.elapsedRealtime()
@@ -263,6 +305,7 @@ class BridgeService : Service() {
         const val ACTION_STOP = "com.axon.bridge.action.STOP"
         const val ACTION_STATE_CHANGED = "com.axon.bridge.action.STATE_CHANGED"
         const val ACTION_MEDIA_COMMAND = "com.axon.bridge.action.MEDIA_COMMAND"
+        const val ACTION_MEDIA_TOGGLE = "com.axon.bridge.action.MEDIA_TOGGLE"
         const val EXTRA_ROLE = "extra_role"
         const val EXTRA_SERVER_IP = "extra_server_ip"
         const val EXTRA_MEDIA_COMMAND = "extra_media_command"

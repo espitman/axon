@@ -21,12 +21,18 @@ android {
         compose = true
     }
 
+    signingConfigs {
+        getByName("debug") {
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = false
+            enableV4Signing = false
+        }
+    }
+
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
-            signingConfig?.enableV2Signing = true
-            signingConfig?.enableV3Signing = false
-            signingConfig?.enableV4Signing = false
             isMinifyEnabled = false
             isShrinkResources = false
         }
@@ -53,6 +59,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-android:1.7.6")
     implementation("androidx.compose.ui:ui-tooling-preview-android:1.7.6")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation(files("/Users/espitman/.gradle/caches/modules-2/files-2.1/androidx.media/media/1.7.0/36fc8f204b2e3aa1b2355d4d0f43ef42cb6d2c82/media-1.7.0.aar"))
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.5")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.5")
     implementation("io.ktor:ktor-client-core:2.3.12")

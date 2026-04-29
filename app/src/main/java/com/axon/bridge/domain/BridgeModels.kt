@@ -41,5 +41,7 @@ data class HomeState(
     val diagnostics: List<String> = emptyList(),
     val smsThreads: List<SmsThread> = emptyList(),
     val activeCall: NotificationPayload? = null,
+    val isScanningReceivers: Boolean = false,
+    val discoveredReceivers: List<DiscoveredReceiver> = emptyList(),
     val errorMessage: String? = null
 )

@@ -4,17 +4,22 @@ import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeMessage
 import com.axon.bridge.domain.BridgeMessageType
 import com.axon.bridge.domain.BridgeRole
+import com.axon.bridge.domain.DiscoveryResponse
 import com.axon.bridge.domain.HelloPayload
 import com.axon.bridge.domain.NotificationPayload
+import io.ktor.http.ContentType
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.http.HttpMethod
+import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.ApplicationEngine
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.response.respondText
+import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets as ServerWebSockets
 import io.ktor.server.websocket.webSocket
@@ -58,6 +63,17 @@ class BridgeTransport(
                 timeoutMillis = 15_000
             }
             routing {
+                get(DISCOVERY_PATH) {
+                    call.respondText(
+                        text = json.encodeToString(
+                            DiscoveryResponse(
+                                deviceName = deviceInfoProvider.currentDevice().displayName,
+                                port = port
+                            )
+                        ),
+                        contentType = ContentType.Application.Json
+                    )
+                }
                 webSocket(BRIDGE_PATH) {
                     DiagnosticsLog.add("Sender connected")
                     onStateChanged(BridgeConnectionState.Connected, null)
@@ -212,5 +228,6 @@ class BridgeTransport(
     companion object {
         const val DEFAULT_PORT = 8080
         const val BRIDGE_PATH = "/bridge"
+        const val DISCOVERY_PATH = "/discovery"
     }
 }

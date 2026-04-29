@@ -21,15 +21,18 @@ import com.axon.bridge.data.CallAlertStore
 import com.axon.bridge.data.DeviceInfoProvider
 import com.axon.bridge.data.DiagnosticsLog
 import com.axon.bridge.data.NetworkInfoProvider
+import com.axon.bridge.data.ReceiverDiscoveryScanner
 import com.axon.bridge.data.SmsArchiveStore
 import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
+import com.axon.bridge.domain.DiscoveredReceiver
 import com.axon.bridge.domain.HomeState
 import com.axon.bridge.domain.PermissionStatus
 import com.axon.bridge.domain.SmsArchiveMessage
 import com.axon.bridge.service.BridgeService
 import com.axon.bridge.service.AxonNotificationListenerService
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,6 +43,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val settings = AxonSettings(appContext)
     private val deviceInfoProvider = DeviceInfoProvider()
     private val networkInfoProvider = NetworkInfoProvider(appContext)
+    private val receiverDiscoveryScanner = ReceiverDiscoveryScanner(appContext)
+    private var scanJob: Job? = null
+    private var isScanningReceivers = false
+    private var discoveredReceivers: List<DiscoveredReceiver> = emptyList()
 
     private val _state = MutableStateFlow(buildState())
     val state: StateFlow<HomeState> = _state.asStateFlow()
@@ -185,6 +192,35 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         refresh()
     }
 
+    fun scanReceivers() {
+        if (isScanningReceivers) return
+        scanJob?.cancel()
+        isScanningReceivers = true
+        discoveredReceivers = emptyList()
+        refresh()
+        scanJob = viewModelScope.launch {
+            discoveredReceivers = receiverDiscoveryScanner.scan()
+            isScanningReceivers = false
+            refresh()
+        }
+    }
+
+    fun clearReceiverScan() {
+        scanJob?.cancel()
+        scanJob = null
+        isScanningReceivers = false
+        discoveredReceivers = emptyList()
+        refresh()
+    }
+
+    fun selectDiscoveredReceiver(receiver: DiscoveredReceiver, startBridge: Boolean = true) {
+        updateServerIp(receiver.ip)
+        clearReceiverScan()
+        if (startBridge && !BridgeService.isRunning.value) {
+            toggleBridge()
+        }
+    }
+
     private fun buildState(): HomeState {
         val role = settings.role
         val localIp = networkInfoProvider.localIpAddress()
@@ -202,6 +238,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             diagnostics = DiagnosticsLog.entries.value,
             smsThreads = SmsArchiveStore.threads(),
             activeCall = CallAlertStore.activeCall.value,
+            isScanningReceivers = isScanningReceivers,
+            discoveredReceivers = discoveredReceivers,
             errorMessage = BridgeService.errorMessage.value
         )
     }
@@ -276,6 +314,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        scanJob?.cancel()
         DiagnosticsLog.onEntryAdded = null
         appContext.unregisterReceiver(bridgeStateReceiver)
         super.onCleared()

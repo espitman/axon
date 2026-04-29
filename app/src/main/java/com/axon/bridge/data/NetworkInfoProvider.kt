@@ -13,6 +13,24 @@ class NetworkInfoProvider(
         return wifiIpAddress().ifBlank { interfaceIpAddress() }
     }
 
+    fun localSubnetCandidates(): List<String> {
+        val localIps = buildList {
+            wifiIpAddress().takeIf { it.isNotBlank() }?.let(::add)
+            addAll(interfaceIpAddresses())
+        }.distinct()
+        return localIps
+            .flatMap { localIp ->
+                val parts = localIp.split(".")
+                if (parts.size != 4) {
+                    emptyList()
+                } else {
+                    val prefix = parts.take(3).joinToString(".")
+                    (1..254).map { "$prefix.$it" }.filterNot { it == localIp }
+                }
+            }
+            .distinct()
+    }
+
     private fun wifiIpAddress(): String {
         val appContext = context ?: return ""
         return runCatching {
@@ -33,19 +51,22 @@ class NetworkInfoProvider(
     }
 
     private fun interfaceIpAddress(): String {
+        return interfaceIpAddresses().firstOrNull().orEmpty()
+    }
+
+    private fun interfaceIpAddresses(): List<String> {
         return runCatching {
             NetworkInterface.getNetworkInterfaces().asSequence()
                 .filter { networkInterface ->
                     networkInterface.isUp &&
-                        !networkInterface.isLoopback &&
-                        networkInterface.name.startsWith("wlan", ignoreCase = true)
+                        !networkInterface.isLoopback
                 }
                 .flatMap { it.inetAddresses.asSequence() }
                 .filterIsInstance<Inet4Address>()
-                .firstOrNull { it.isUsableLanAddress() }
-                ?.hostAddress
-                .orEmpty()
-        }.getOrDefault("")
+                .filter { it.isUsableLanAddress() }
+                .mapNotNull { it.hostAddress }
+                .toList()
+        }.getOrDefault(emptyList())
     }
 
     private fun Inet4Address.isUsableLanAddress(): Boolean {

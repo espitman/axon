@@ -33,6 +33,14 @@ data class HelloPayload(
 )
 
 @Serializable
+data class DiscoveryResponse(
+    val app: String = "Axon",
+    val role: BridgeRole = BridgeRole.Sink,
+    val deviceName: String,
+    val port: Int
+)
+
+@Serializable
 data class NotificationPayload(
     val id: String,
     val category: NotificationCategory,

@@ -17,6 +17,11 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -56,7 +61,6 @@ import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Settings
@@ -66,17 +70,17 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -102,9 +106,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
+import com.axon.bridge.domain.DiscoveredReceiver
 import com.axon.bridge.domain.HomeState
 import com.axon.bridge.domain.NotificationPayload
 import com.axon.bridge.domain.SmsArchiveMessage
@@ -292,8 +298,9 @@ private fun AxonTheme(content: @Composable () -> Unit) {
 private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
-    val ipSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var isIpSheetOpen by remember { mutableStateOf(false) }
+    var isScanDialogOpen by remember { mutableStateOf(false) }
+    var isManualIpSheetOpen by remember { mutableStateOf(false) }
+    val manualIpSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var currentPage by remember { mutableStateOf(AxonPage.Home) }
     var selectedThreadId by remember { mutableStateOf<String?>(null) }
     var draftReceiverIp by remember { mutableStateOf("") }
@@ -385,11 +392,9 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                     ) {
                         TopBar(
                             onMessagesClick = {
-                                isIpSheetOpen = false
                                 currentPage = AxonPage.Inbox
                             },
                             onSettingsClick = {
-                                isIpSheetOpen = false
                                 currentPage = AxonPage.Settings
                             }
                         )
@@ -401,17 +406,21 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                             verticalArrangement = Arrangement.spacedBy(18.dp)
                         ) {
                             ConnectionPanel(state = state)
+                            if (state.role == BridgeRole.Source) {
+                                CompactActionButton(
+                                    text = "Scan network",
+                                    onClick = {
+                                        isScanDialogOpen = true
+                                        viewModel.scanReceivers()
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                             RoleSwitch(
                                 selectedRole = state.role,
                                 onRoleSelected = viewModel::selectRole
                             )
-                            StatusPanel(
-                                state = state,
-                                onEditReceiverIp = {
-                                    draftReceiverIp = state.serverIp
-                                    isIpSheetOpen = true
-                                }
-                            )
+                            StatusPanel(state = state)
                         }
                         ActionRow(
                             isRunning = state.isBridgeRunning,
@@ -422,20 +431,49 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                 }
             }
 
-            if (currentPage == AxonPage.Home && isIpSheetOpen) {
+            if (currentPage == AxonPage.Home && isScanDialogOpen) {
+                Dialog(
+                    onDismissRequest = {
+                        isScanDialogOpen = false
+                        viewModel.clearReceiverScan()
+                    }
+                ) {
+                    ReceiverDiscoveryDialog(
+                        isScanning = state.isScanningReceivers,
+                        receivers = state.discoveredReceivers,
+                        onReceiverSelected = { receiver ->
+                            isScanDialogOpen = false
+                            viewModel.selectDiscoveredReceiver(receiver)
+                        },
+                        onScanAgain = viewModel::scanReceivers,
+                        onManualEntry = {
+                            isScanDialogOpen = false
+                            viewModel.clearReceiverScan()
+                            draftReceiverIp = state.serverIp
+                            isManualIpSheetOpen = true
+                        },
+                        onCancel = {
+                            isScanDialogOpen = false
+                            viewModel.clearReceiverScan()
+                        }
+                    )
+                }
+            }
+
+            if (currentPage == AxonPage.Home && isManualIpSheetOpen) {
                 ModalBottomSheet(
-                    onDismissRequest = { isIpSheetOpen = false },
-                    sheetState = ipSheetState,
+                    onDismissRequest = { isManualIpSheetOpen = false },
+                    sheetState = manualIpSheetState,
                     containerColor = AxonColor.Panel,
                     contentColor = AxonColor.Text
                 ) {
-                    ReceiverIpSheet(
+                    ManualReceiverIpSheet(
                         receiverIp = draftReceiverIp,
                         onReceiverIpChanged = { draftReceiverIp = it },
-                        onCancel = { isIpSheetOpen = false },
+                        onCancel = { isManualIpSheetOpen = false },
                         onSave = {
                             viewModel.updateServerIp(draftReceiverIp)
-                            isIpSheetOpen = false
+                            isManualIpSheetOpen = false
                         }
                     )
                 }
@@ -755,10 +793,7 @@ private fun RoleTab(
 }
 
 @Composable
-private fun StatusPanel(
-    state: HomeState,
-    onEditReceiverIp: () -> Unit
-) {
+private fun StatusPanel(state: HomeState) {
     val endpointValue = when (state.role) {
         BridgeRole.Sink -> state.localIp.ifBlank { "No LAN IP" }
         BridgeRole.Source -> state.serverIp.ifBlank { "Not set" }
@@ -769,9 +804,7 @@ private fun StatusPanel(
                 Icons.Rounded.Wifi,
                 if (state.role == BridgeRole.Sink) "Local IP" else "Receiver IP",
                 endpointValue,
-                if (endpointValue == "Not set" || endpointValue == "No LAN IP") AxonColor.Red else AxonColor.Cyan,
-                actionLabel = if (state.role == BridgeRole.Source) "Edit" else null,
-                onAction = if (state.role == BridgeRole.Source) onEditReceiverIp else null
+                if (endpointValue == "Not set" || endpointValue == "No LAN IP") AxonColor.Red else AxonColor.Cyan
             )
         )
         add(
@@ -1579,9 +1612,7 @@ private data class StatusRowData(
     val icon: ImageVector,
     val title: String,
     val value: String,
-    val accent: Color,
-    val actionLabel: String? = null,
-    val onAction: (() -> Unit)? = null
+    val accent: Color
 )
 
 @Composable
@@ -1592,7 +1623,6 @@ private fun StatusRow(row: StatusRowData) {
             .clip(RoundedCornerShape(8.dp))
             .background(AxonColor.Panel)
             .border(1.dp, AxonColor.Border, RoundedCornerShape(8.dp))
-            .then(if (row.onAction != null) Modifier.clickable { row.onAction.invoke() } else Modifier)
             .padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1630,28 +1660,96 @@ private fun StatusRow(row: StatusRowData) {
             modifier = Modifier.weight(0.72f),
             overflow = TextOverflow.Ellipsis
         )
-        if (row.actionLabel != null && row.onAction != null) {
-            Spacer(Modifier.width(8.dp))
-            Button(
-                onClick = row.onAction,
-                modifier = Modifier.height(34.dp),
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AxonColor.PanelRaised,
-                    contentColor = AxonColor.Text
-                )
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Edit,
-                    contentDescription = null,
-                    modifier = Modifier.size(15.dp)
-                )
-                Spacer(Modifier.width(4.dp))
+    }
+}
+
+@Composable
+private fun ReceiverDiscoveryDialog(
+    isScanning: Boolean,
+    receivers: List<DiscoveredReceiver>,
+    onReceiverSelected: (DiscoveredReceiver) -> Unit,
+    onScanAgain: () -> Unit,
+    onManualEntry: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(20.dp),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = AxonColor.Panel),
+        border = BorderStroke(1.dp, AxonColor.Border)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            Text(
+                text = "Find Receiver",
+                color = AxonColor.Text,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+            RadarScanner(isActive = isScanning)
+            Text(
+                text = when {
+                    isScanning -> "Scanning local network..."
+                    receivers.isNotEmpty() -> "${receivers.size} receiver found"
+                    else -> "No receiver found"
+                },
+                color = if (receivers.isNotEmpty()) AxonColor.Green else AxonColor.Muted,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+
+            if (receivers.isNotEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    receivers.forEach { receiver ->
+                        ReceiverCandidateRow(
+                            receiver = receiver,
+                            onClick = { onReceiverSelected(receiver) }
+                        )
+                    }
+                }
+            } else if (!isScanning) {
                 Text(
-                    text = row.actionLabel,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
+                    text = "Make sure Receiver is started on the same Wi-Fi.",
+                    color = AxonColor.Muted,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2
+                )
+            }
+
+            if (!isScanning) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CompactActionButton(
+                        text = "Scan again",
+                        onClick = onScanAgain,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    CompactActionButton(
+                        text = "Enter manually",
+                        onClick = onManualEntry,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            } else {
+                CompactActionButton(
+                    text = "Cancel",
+                    onClick = onCancel,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }
@@ -1659,7 +1757,7 @@ private fun StatusRow(row: StatusRowData) {
 }
 
 @Composable
-private fun ReceiverIpSheet(
+private fun ManualReceiverIpSheet(
     receiverIp: String,
     onReceiverIpChanged: (String) -> Unit,
     onCancel: () -> Unit,
@@ -1701,35 +1799,162 @@ private fun ReceiverIpSheet(
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Button(
+            CompactActionButton(
+                text = "Cancel",
                 onClick = onCancel,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(50.dp),
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AxonColor.PanelRaised,
-                    contentColor = AxonColor.Text
-                )
-            ) {
-                Text("Cancel", fontWeight = FontWeight.SemiBold)
-            }
+                modifier = Modifier.weight(1f)
+            )
             Button(
                 onClick = onSave,
                 modifier = Modifier
                     .weight(1f)
-                    .height(50.dp),
+                    .height(48.dp),
                 shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = AxonColor.Cyan,
                     contentColor = Color(0xFF031516)
                 )
             ) {
-                Text("Save", fontWeight = FontWeight.Bold)
+                Text("Save", fontWeight = FontWeight.Bold, maxLines = 1)
             }
         }
+    }
+}
+
+@Composable
+private fun ReceiverCandidateRow(
+    receiver: DiscoveredReceiver,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(AxonColor.PanelRaised)
+            .border(1.dp, AxonColor.Cyan.copy(alpha = 0.42f), RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(AxonColor.Cyan.copy(alpha = 0.13f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Smartphone,
+                contentDescription = null,
+                tint = AxonColor.Cyan,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = receiver.deviceName,
+                color = AxonColor.Text,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "${receiver.ip}:${receiver.port}",
+                color = AxonColor.Muted,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Button(
+            onClick = onClick,
+            modifier = Modifier.height(36.dp),
+            shape = RoundedCornerShape(8.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = AxonColor.Cyan,
+                contentColor = Color(0xFF031516)
+            )
+        ) {
+            Text(
+                text = "Use",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun RadarScanner(isActive: Boolean) {
+    val transition = rememberInfiniteTransition(label = "receiver radar")
+    val sweep by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1300, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "radar sweep"
+    )
+    val pulse by transition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1100, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "radar pulse"
+    )
+
+    Box(
+        modifier = Modifier.size(170.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val radius = size.minDimension / 2f
+            drawCircle(
+                color = AxonColor.Cyan.copy(alpha = 0.07f + if (isActive) pulse * 0.05f else 0f),
+                radius = radius * 0.92f,
+                center = center
+            )
+            drawCircle(
+                color = AxonColor.Cyan.copy(alpha = 0.16f),
+                radius = radius * 0.62f,
+                center = center,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2.dp.toPx())
+            )
+            drawCircle(
+                color = AxonColor.Cyan.copy(alpha = 0.22f),
+                radius = radius * 0.88f,
+                center = center,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2.dp.toPx())
+            )
+            val angle = Math.toRadians(if (isActive) sweep.toDouble() else 300.0)
+            val end = Offset(
+                x = center.x + kotlin.math.cos(angle).toFloat() * radius * 0.82f,
+                y = center.y + kotlin.math.sin(angle).toFloat() * radius * 0.82f
+            )
+            drawLine(
+                color = AxonColor.Cyan.copy(alpha = if (isActive) 0.9f else 0.45f),
+                start = center,
+                end = end,
+                strokeWidth = 3.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawCircle(color = AxonColor.Cyan, radius = 5.dp.toPx(), center = center)
+        }
+        Icon(
+            imageVector = Icons.Rounded.Wifi,
+            contentDescription = null,
+            tint = AxonColor.Text,
+            modifier = Modifier.size(28.dp)
+        )
     }
 }
 

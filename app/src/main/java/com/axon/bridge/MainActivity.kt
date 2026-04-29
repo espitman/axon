@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -62,9 +63,13 @@ import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.Button
@@ -74,6 +79,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -113,6 +119,8 @@ import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
 import com.axon.bridge.domain.DiscoveredReceiver
 import com.axon.bridge.domain.HomeState
+import com.axon.bridge.domain.MediaCommandAction
+import com.axon.bridge.domain.MediaPayload
 import com.axon.bridge.domain.NotificationPayload
 import com.axon.bridge.domain.SmsArchiveMessage
 import com.axon.bridge.domain.SmsThread
@@ -420,6 +428,12 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                             RoleSwitch(
                                 selectedRole = state.role,
                                 onRoleSelected = viewModel::selectRole
+                            )
+                            MediaPanel(
+                                media = state.activeMedia,
+                                updatedAtElapsed = state.activeMediaUpdatedAtElapsed,
+                                canControl = state.role == BridgeRole.Sink && state.isBridgeRunning,
+                                onCommand = viewModel::sendMediaCommand
                             )
                             StatusPanel(state = state)
                         }
@@ -791,6 +805,157 @@ private fun RoleTab(
             overflow = TextOverflow.Ellipsis
         )
     }
+}
+
+@Composable
+private fun MediaPanel(
+    media: MediaPayload?,
+    updatedAtElapsed: Long,
+    canControl: Boolean,
+    onCommand: (MediaCommandAction) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = AxonColor.Panel),
+        border = BorderStroke(1.dp, AxonColor.Border)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(AxonColor.Cyan.copy(alpha = 0.13f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.MusicNote,
+                        contentDescription = null,
+                        tint = AxonColor.Cyan,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = media?.title?.ifBlank { "No media playing" } ?: "No media playing",
+                        color = AxonColor.Text,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = media?.artist?.ifBlank { media.packageName } ?: "Waiting for Sender media",
+                        color = AxonColor.Muted,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                StatusPill(
+                    text = if (media?.isPlaying == true) "PLAYING" else "IDLE",
+                    color = if (media?.isPlaying == true) AxonColor.Green else AxonColor.Muted
+                )
+            }
+
+            val progress = mediaProgress(media, updatedAtElapsed)
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                color = AxonColor.Cyan,
+                trackColor = AxonColor.Border
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MediaControlButton(
+                    icon = Icons.Rounded.SkipPrevious,
+                    enabled = media != null && canControl,
+                    onClick = { onCommand(MediaCommandAction.SkipToPrevious) }
+                )
+                Spacer(Modifier.width(10.dp))
+                MediaControlButton(
+                    icon = if (media?.isPlaying == true) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    enabled = media != null && canControl,
+                    prominent = true,
+                    onClick = {
+                        onCommand(
+                            if (media?.isPlaying == true) {
+                                MediaCommandAction.Pause
+                            } else {
+                                MediaCommandAction.Play
+                            }
+                        )
+                    }
+                )
+                Spacer(Modifier.width(10.dp))
+                MediaControlButton(
+                    icon = Icons.Rounded.SkipNext,
+                    enabled = media != null && canControl,
+                    onClick = { onCommand(MediaCommandAction.SkipToNext) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediaControlButton(
+    icon: ImageVector,
+    enabled: Boolean,
+    prominent: Boolean = false,
+    onClick: () -> Unit
+) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .size(if (prominent) 48.dp else 42.dp)
+            .clip(CircleShape)
+            .background(
+                when {
+                    !enabled -> AxonColor.PanelRaised
+                    prominent -> AxonColor.Cyan
+                    else -> AxonColor.PanelRaised
+                }
+            )
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = when {
+                !enabled -> AxonColor.Muted
+                prominent -> Color(0xFF031516)
+                else -> AxonColor.Text
+            },
+            modifier = Modifier.size(if (prominent) 25.dp else 22.dp)
+        )
+    }
+}
+
+private fun mediaProgress(media: MediaPayload?, updatedAtElapsed: Long): Float {
+    if (media == null || media.duration <= 0L) return 0f
+    val elapsed = if (media.isPlaying && updatedAtElapsed > 0L) {
+        ((SystemClock.elapsedRealtime() - updatedAtElapsed) * media.playbackSpeed.coerceAtLeast(0f)).toLong()
+    } else {
+        0L
+    }
+    return ((media.position + elapsed).coerceIn(0L, media.duration).toFloat() / media.duration.toFloat())
+        .coerceIn(0f, 1f)
 }
 
 @Composable

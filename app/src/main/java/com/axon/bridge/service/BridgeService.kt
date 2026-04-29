@@ -9,13 +9,20 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.axon.bridge.R
 import com.axon.bridge.data.BridgeTransport
 import com.axon.bridge.data.CallAlertStore
 import com.axon.bridge.data.DeviceInfoProvider
-import com.axon.bridge.data.NetworkInfoProvider
+import com.axon.bridge.data.DiagnosticsLog
+import com.axon.bridge.data.MediaBridgeBus
+import com.axon.bridge.data.MediaSessionTracker
+import com.axon.bridge.data.ShadowMediaSession
 import com.axon.bridge.data.SmsArchiveStore
+import com.axon.bridge.domain.MediaCommandAction
+import com.axon.bridge.domain.MediaCommandPayload
+import com.axon.bridge.domain.MediaPayload
 import com.axon.bridge.domain.NotificationCategory
 import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
@@ -30,6 +37,9 @@ class BridgeService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var transport: BridgeTransport
     private lateinit var mirroredNotificationManager: MirroredNotificationManager
+    private lateinit var mediaNotificationManager: MediaNotificationManager
+    private lateinit var mediaSessionTracker: MediaSessionTracker
+    private lateinit var shadowMediaSession: ShadowMediaSession
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
@@ -37,6 +47,22 @@ class BridgeService : Service() {
         createNotificationChannel()
         SmsArchiveStore.init(this)
         mirroredNotificationManager = MirroredNotificationManager(this)
+        mediaNotificationManager = MediaNotificationManager(this)
+        mediaSessionTracker = MediaSessionTracker(
+            context = this,
+            onMediaChanged = { payload ->
+                publishMedia(payload)
+                MediaBridgeBus.publishUpdate(payload)
+            },
+            onMediaCleared = {
+                clearMedia()
+                MediaBridgeBus.publishClear()
+            }
+        )
+        shadowMediaSession = ShadowMediaSession(
+            context = this,
+            onCommand = MediaBridgeBus::publishCommand
+        )
         transport = BridgeTransport(
             scope = serviceScope,
             deviceInfoProvider = DeviceInfoProvider(),
@@ -56,6 +82,19 @@ class BridgeService : Service() {
                     CallAlertStore.show(payload)
                 }
                 mirroredNotificationManager.show(payload)
+            },
+            onMediaUpdateReceived = { payload ->
+                publishMedia(payload)
+                shadowMediaSession.update(payload)
+                shadowMediaSession.token()?.let { token ->
+                    mediaNotificationManager.show(payload, token)
+                }
+            },
+            onMediaCommandReceived = { command ->
+                mediaSessionTracker.dispatchCommand(command)
+            },
+            onMediaCleared = {
+                clearMedia()
             }
         )
     }
@@ -65,6 +104,10 @@ class BridgeService : Service() {
             ACTION_STOP -> {
                 stopBridge()
                 return START_NOT_STICKY
+            }
+            ACTION_MEDIA_COMMAND -> {
+                handleMediaCommand(intent)
+                return START_STICKY
             }
             else -> startBridge(intent)
         }
@@ -83,16 +126,26 @@ class BridgeService : Service() {
         updateState(BridgeConnectionState.Connecting, null)
         acquireWakeLock()
         startForeground(NOTIFICATION_ID, buildNotification(role, serverIp))
+        mediaSessionTracker.stop()
+        shadowMediaSession.stop()
 
         when (role) {
             BridgeRole.Sink -> {
+                shadowMediaSession.start()
                 transport.startServer(host = "0.0.0.0")
             }
-            BridgeRole.Source -> transport.startClient(serverIp)
+            BridgeRole.Source -> {
+                mediaSessionTracker.start()
+                transport.startClient(serverIp)
+            }
         }
     }
 
     private fun stopBridge() {
+        mediaSessionTracker.stop()
+        shadowMediaSession.stop()
+        mediaNotificationManager.cancel()
+        clearMedia()
         transport.stop()
         releaseWakeLock()
         updateState(BridgeConnectionState.Disconnected, null, running = false)
@@ -121,6 +174,34 @@ class BridgeService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .addAction(0, "Stop", stopIntent)
             .build()
+    }
+
+    private fun handleMediaCommand(intent: Intent) {
+        val action = runCatching {
+            MediaCommandAction.valueOf(intent.getStringExtra(EXTRA_MEDIA_COMMAND).orEmpty())
+        }.getOrNull()
+
+        if (action == null) {
+            DiagnosticsLog.add("Media notification command skipped: unknown action")
+            return
+        }
+
+        DiagnosticsLog.add("Media notification command: $action")
+        MediaBridgeBus.publishCommand(MediaCommandPayload(action))
+    }
+
+    private fun publishMedia(payload: MediaPayload) {
+        mutableActiveMedia.value = payload
+        mutableActiveMediaUpdatedAtElapsed.value = SystemClock.elapsedRealtime()
+        sendStateChangedBroadcast()
+    }
+
+    private fun clearMedia() {
+        mutableActiveMedia.value = null
+        mutableActiveMediaUpdatedAtElapsed.value = 0L
+        shadowMediaSession.stop()
+        mediaNotificationManager.cancel()
+        sendStateChangedBroadcast()
     }
 
     private fun createNotificationChannel() {
@@ -164,6 +245,10 @@ class BridgeService : Service() {
     }
 
     override fun onDestroy() {
+        mediaSessionTracker.stop()
+        shadowMediaSession.release()
+        mediaNotificationManager.cancel()
+        clearMedia()
         transport.stop()
         releaseWakeLock()
         serviceScope.cancel()
@@ -177,8 +262,10 @@ class BridgeService : Service() {
         const val ACTION_START = "com.axon.bridge.action.START"
         const val ACTION_STOP = "com.axon.bridge.action.STOP"
         const val ACTION_STATE_CHANGED = "com.axon.bridge.action.STATE_CHANGED"
+        const val ACTION_MEDIA_COMMAND = "com.axon.bridge.action.MEDIA_COMMAND"
         const val EXTRA_ROLE = "extra_role"
         const val EXTRA_SERVER_IP = "extra_server_ip"
+        const val EXTRA_MEDIA_COMMAND = "extra_media_command"
 
         private const val CHANNEL_ID = "axon_bridge"
         private const val NOTIFICATION_ID = 10_001
@@ -189,6 +276,8 @@ class BridgeService : Service() {
         private val mutablePeerDeviceName = MutableStateFlow("")
         private val mutableActiveTargetIp = MutableStateFlow("")
         private val mutableLastEventTimeMillis = MutableStateFlow(0L)
+        private val mutableActiveMedia = MutableStateFlow<MediaPayload?>(null)
+        private val mutableActiveMediaUpdatedAtElapsed = MutableStateFlow(0L)
 
         val connectionState: StateFlow<BridgeConnectionState> = mutableConnectionState
         val isRunning: StateFlow<Boolean> = mutableIsRunning
@@ -196,6 +285,8 @@ class BridgeService : Service() {
         val peerDeviceName: StateFlow<String> = mutablePeerDeviceName
         val activeTargetIp: StateFlow<String> = mutableActiveTargetIp
         val lastEventTimeMillis: StateFlow<Long> = mutableLastEventTimeMillis
+        val activeMedia: StateFlow<MediaPayload?> = mutableActiveMedia
+        val activeMediaUpdatedAtElapsed: StateFlow<Long> = mutableActiveMediaUpdatedAtElapsed
 
         fun publishState(
             state: BridgeConnectionState,
@@ -208,6 +299,8 @@ class BridgeService : Service() {
             if (!running) {
                 mutablePeerDeviceName.value = ""
                 mutableActiveTargetIp.value = ""
+                mutableActiveMedia.value = null
+                mutableActiveMediaUpdatedAtElapsed.value = 0L
             }
         }
     }

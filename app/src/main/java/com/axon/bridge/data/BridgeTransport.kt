@@ -6,6 +6,8 @@ import com.axon.bridge.domain.BridgeMessageType
 import com.axon.bridge.domain.BridgeRole
 import com.axon.bridge.domain.DiscoveryResponse
 import com.axon.bridge.domain.HelloPayload
+import com.axon.bridge.domain.MediaCommandPayload
+import com.axon.bridge.domain.MediaPayload
 import com.axon.bridge.domain.NotificationPayload
 import io.ktor.http.ContentType
 import io.ktor.client.HttpClient
@@ -43,7 +45,10 @@ class BridgeTransport(
     private val onStateChanged: (BridgeConnectionState, String?) -> Unit,
     private val onPeerChanged: (String) -> Unit,
     private val onEventTransferred: () -> Unit,
-    private val onNotificationReceived: (NotificationPayload) -> Unit
+    private val onNotificationReceived: (NotificationPayload) -> Unit,
+    private val onMediaUpdateReceived: (MediaPayload) -> Unit = {},
+    private val onMediaCommandReceived: (MediaCommandPayload) -> Unit = {},
+    private val onMediaCleared: () -> Unit = {}
 ) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -78,6 +83,7 @@ class BridgeTransport(
                     DiagnosticsLog.add("Sender connected")
                     onStateChanged(BridgeConnectionState.Connected, null)
                     sendHello(BridgeRole.Sink)
+                    val commandJob = launchMediaCommandSender()
                     val pingJob = launchPingSender()
                     try {
                         for (frame in incoming) {
@@ -86,7 +92,9 @@ class BridgeTransport(
                             }
                         }
                     } finally {
+                        commandJob.cancelAndJoin()
                         pingJob.cancelAndJoin()
+                        onMediaCleared()
                         if (server != null) {
                             onStateChanged(BridgeConnectionState.Connecting, "Waiting for sender device")
                         } else {
@@ -145,6 +153,8 @@ class BridgeTransport(
                                     onEventTransferred()
                                 }
                             }
+                            val mediaUpdateJob = launchMediaUpdateSender()
+                            val mediaClearJob = launchMediaClearSender()
                             val pingJob = launchPingSender()
                             try {
                                 for (frame in incoming) {
@@ -154,6 +164,8 @@ class BridgeTransport(
                                 }
                             } finally {
                                 outgoingJob.cancelAndJoin()
+                                mediaUpdateJob.cancelAndJoin()
+                                mediaClearJob.cancelAndJoin()
                                 pingJob.cancelAndJoin()
                             }
                         }
@@ -212,6 +224,76 @@ class BridgeTransport(
             }
             BridgeMessageType.Ack -> {
                 DiagnosticsLog.add("Ping acknowledged")
+            }
+            BridgeMessageType.MediaUpdate -> {
+                message.media?.let { media ->
+                    DiagnosticsLog.add("Media update received: ${media.title}")
+                    onMediaUpdateReceived(media)
+                    onEventTransferred()
+                }
+            }
+            BridgeMessageType.MediaCommand -> {
+                message.command?.let { command ->
+                    DiagnosticsLog.add("Media command received: ${command.action.name}")
+                    onMediaCommandReceived(command)
+                }
+            }
+            BridgeMessageType.MediaClear -> {
+                DiagnosticsLog.add("Media clear received")
+                onMediaCleared()
+            }
+        }
+    }
+
+    private fun io.ktor.websocket.WebSocketSession.launchMediaUpdateSender(): Job {
+        return scope.launch {
+            MediaBridgeBus.updates.collect { payload ->
+                send(
+                    Frame.Text(
+                        json.encodeToString(
+                            BridgeMessage(
+                                type = BridgeMessageType.MediaUpdate,
+                                media = payload
+                            )
+                        )
+                    )
+                )
+                DiagnosticsLog.add("Sent media: ${payload.title.ifBlank { "Unknown track" }}")
+                onEventTransferred()
+            }
+        }
+    }
+
+    private fun io.ktor.websocket.WebSocketSession.launchMediaCommandSender(): Job {
+        return scope.launch {
+            MediaBridgeBus.commands.collect { payload ->
+                send(
+                    Frame.Text(
+                        json.encodeToString(
+                            BridgeMessage(
+                                type = BridgeMessageType.MediaCommand,
+                                command = payload
+                            )
+                        )
+                    )
+                )
+                DiagnosticsLog.add("Sent media command: ${payload.action.name}")
+            }
+        }
+    }
+
+    private fun io.ktor.websocket.WebSocketSession.launchMediaClearSender(): Job {
+        return scope.launch {
+            MediaBridgeBus.clears.collect {
+                send(
+                    Frame.Text(
+                        json.encodeToString(
+                            BridgeMessage(type = BridgeMessageType.MediaClear)
+                        )
+                    )
+                )
+                DiagnosticsLog.add("Sent media clear")
+                onEventTransferred()
             }
         }
     }

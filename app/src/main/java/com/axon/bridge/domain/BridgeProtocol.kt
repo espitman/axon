@@ -7,7 +7,9 @@ import kotlinx.serialization.Serializable
 data class BridgeMessage(
     val type: BridgeMessageType,
     val payload: NotificationPayload? = null,
-    val hello: HelloPayload? = null
+    val hello: HelloPayload? = null,
+    val media: MediaPayload? = null,
+    val command: MediaCommandPayload? = null
 )
 
 @Serializable
@@ -22,7 +24,16 @@ enum class BridgeMessageType {
     Ping,
 
     @SerialName("ACK")
-    Ack
+    Ack,
+
+    @SerialName("MEDIA_UPDATE")
+    MediaUpdate,
+
+    @SerialName("MEDIA_COMMAND")
+    MediaCommand,
+
+    @SerialName("MEDIA_CLEAR")
+    MediaClear
 }
 
 @Serializable
@@ -50,6 +61,39 @@ data class NotificationPayload(
     val packageName: String,
     val postedTime: Long
 )
+
+@Serializable
+data class MediaPayload(
+    val title: String,
+    val artist: String,
+    val album: String = "",
+    val duration: Long,
+    val position: Long,
+    val playbackSpeed: Float,
+    val isPlaying: Boolean,
+    val lastPositionUpdateTime: Long,
+    val packageName: String
+)
+
+@Serializable
+data class MediaCommandPayload(
+    val action: MediaCommandAction
+)
+
+@Serializable
+enum class MediaCommandAction {
+    @SerialName("PLAY")
+    Play,
+
+    @SerialName("PAUSE")
+    Pause,
+
+    @SerialName("SKIP_TO_NEXT")
+    SkipToNext,
+
+    @SerialName("SKIP_TO_PREVIOUS")
+    SkipToPrevious
+}
 
 @Serializable
 enum class NotificationCategory {

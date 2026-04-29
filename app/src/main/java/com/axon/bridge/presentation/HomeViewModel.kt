@@ -20,6 +20,7 @@ import com.axon.bridge.data.BridgeCommandBus
 import com.axon.bridge.data.CallAlertStore
 import com.axon.bridge.data.DeviceInfoProvider
 import com.axon.bridge.data.DiagnosticsLog
+import com.axon.bridge.data.MediaBridgeBus
 import com.axon.bridge.data.NetworkInfoProvider
 import com.axon.bridge.data.ReceiverDiscoveryScanner
 import com.axon.bridge.data.SmsArchiveStore
@@ -27,6 +28,8 @@ import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
 import com.axon.bridge.domain.DiscoveredReceiver
 import com.axon.bridge.domain.HomeState
+import com.axon.bridge.domain.MediaCommandAction
+import com.axon.bridge.domain.MediaCommandPayload
 import com.axon.bridge.domain.PermissionStatus
 import com.axon.bridge.domain.SmsArchiveMessage
 import com.axon.bridge.service.BridgeService
@@ -173,6 +176,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         refresh()
     }
 
+    fun sendMediaCommand(action: MediaCommandAction) {
+        MediaBridgeBus.publishCommand(MediaCommandPayload(action))
+        DiagnosticsLog.add("Media control requested: ${action.name}")
+        refresh()
+    }
+
     fun clearDiagnostics() {
         DiagnosticsLog.clear()
         refresh()
@@ -238,6 +247,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             diagnostics = DiagnosticsLog.entries.value,
             smsThreads = SmsArchiveStore.threads(),
             activeCall = CallAlertStore.activeCall.value,
+            activeMedia = BridgeService.activeMedia.value,
+            activeMediaUpdatedAtElapsed = BridgeService.activeMediaUpdatedAtElapsed.value,
             isScanningReceivers = isScanningReceivers,
             discoveredReceivers = discoveredReceivers,
             errorMessage = BridgeService.errorMessage.value

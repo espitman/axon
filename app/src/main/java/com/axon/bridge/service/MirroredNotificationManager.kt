@@ -10,6 +10,7 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.Person
 import com.axon.bridge.CallActivity
 import com.axon.bridge.MainActivity
 import com.axon.bridge.R
@@ -58,8 +59,21 @@ class MirroredNotificationManager(
         } else {
             null
         }
+        val rejectIntent = if (payload.category == NotificationCategory.Call) {
+            PendingIntent.getService(
+                context,
+                notificationId + 2,
+                Intent(context, BridgeService::class.java).apply {
+                    action = BridgeService.ACTION_CALL_REJECT
+                    putExtra(BridgeService.EXTRA_NOTIFICATION_ID, notificationId)
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        } else {
+            null
+        }
         val channelId = if (payload.category == NotificationCategory.Call) CALL_CHANNEL_ID else CHANNEL_ID
-        val notification = NotificationCompat.Builder(context, channelId)
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_axon_mark)
             .setContentTitle(payload.title)
             .setContentText(payload.message.ifBlank { "Mirrored $categoryLabel from ${payload.originDevice}" })
@@ -89,8 +103,23 @@ class MirroredNotificationManager(
                 if (fullScreenIntent != null) {
                     setFullScreenIntent(fullScreenIntent, true)
                 }
+                if (payload.category == NotificationCategory.Call && rejectIntent != null) {
+                    val caller = Person.Builder()
+                        .setName(payload.title.ifBlank { "Incoming call" })
+                        .setImportant(true)
+                        .build()
+                    setStyle(
+                        NotificationCompat.CallStyle.forIncomingCall(
+                            caller,
+                            rejectIntent,
+                            contentIntent
+                        ).setDeclineButtonColorHint(0xFFFF7A7A.toInt())
+                    )
+                    setColorized(true)
+                    setColor(0xFF31D7D5.toInt())
+                }
             }
-            .build()
+        val notification = builder.build()
 
         runCatching {
             NotificationManagerCompat.from(context).notify(notificationId, notification)
@@ -123,6 +152,7 @@ class MirroredNotificationManager(
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val notificationManager = context.getSystemService(NotificationManager::class.java)
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Mirrored Alerts",
@@ -143,15 +173,19 @@ class MirroredNotificationManager(
             enableVibration(true)
             setShowBadge(true)
         }
-        context.getSystemService(NotificationManager::class.java).apply {
+        notificationManager.apply {
             createNotificationChannel(channel)
             createNotificationChannel(callChannel)
+            val importance = getNotificationChannel(CALL_CHANNEL_ID)?.importance ?: NotificationManager.IMPORTANCE_NONE
+            if (importance < NotificationManager.IMPORTANCE_HIGH) {
+                DiagnosticsLog.add("Incoming Calls channel is not high priority")
+            }
         }
     }
 
     companion object {
         private const val CHANNEL_ID = "mirrored_alerts_wear"
-        private const val CALL_CHANNEL_ID = "mirrored_incoming_calls"
+        private const val CALL_CHANNEL_ID = "mirrored_incoming_calls_v2"
 
         fun notificationId(payload: NotificationPayload): Int {
             return payload.id.hashCode().absoluteValue

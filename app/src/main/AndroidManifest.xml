@@ -37,8 +37,9 @@
             android:name=".CallActivity"
             android:excludeFromRecents="true"
             android:exported="false"
+            android:launchMode="singleTop"
             android:screenOrientation="portrait"
-            android:showOnLockScreen="true"
+            android:showWhenLocked="true"
             android:turnScreenOn="true" />
         <service
             android:name=".service.BridgeService"

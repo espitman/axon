@@ -23,6 +23,7 @@ import com.axon.bridge.R
 import com.axon.bridge.data.AxonSettings
 import com.axon.bridge.data.BridgeTransport
 import com.axon.bridge.data.CallAlertStore
+import com.axon.bridge.data.CallBridgeBus
 import com.axon.bridge.data.DeviceInfoProvider
 import com.axon.bridge.data.DiagnosticsLog
 import com.axon.bridge.data.MediaBridgeBus
@@ -157,6 +158,10 @@ class BridgeService : Service() {
             }
             ACTION_MEDIA_TOGGLE -> {
                 handleMediaToggle()
+                return START_STICKY
+            }
+            ACTION_CALL_REJECT -> {
+                handleReceiverCallReject(intent)
                 return START_STICKY
             }
             Intent.ACTION_MEDIA_BUTTON -> {
@@ -349,6 +354,17 @@ class BridgeService : Service() {
         }
     }
 
+    private fun handleReceiverCallReject(intent: Intent) {
+        val notificationId = intent.getIntExtra(EXTRA_NOTIFICATION_ID, 0)
+        if (notificationId != 0) {
+            getSystemService(NotificationManager::class.java)?.cancel(notificationId)
+        }
+        CallAlertStore.clearActive()
+        CallBridgeBus.publishCommand(CallCommandPayload(CallCommandAction.Reject))
+        DiagnosticsLog.add("Call reject command requested")
+        sendStateChangedBroadcast()
+    }
+
     @Suppress("DEPRECATION")
     private fun rejectActivePhoneCall() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
@@ -516,9 +532,11 @@ class BridgeService : Service() {
         const val ACTION_STATE_CHANGED = "com.axon.bridge.action.STATE_CHANGED"
         const val ACTION_MEDIA_COMMAND = "com.axon.bridge.action.MEDIA_COMMAND"
         const val ACTION_MEDIA_TOGGLE = "com.axon.bridge.action.MEDIA_TOGGLE"
+        const val ACTION_CALL_REJECT = "com.axon.bridge.action.CALL_REJECT"
         const val EXTRA_ROLE = "extra_role"
         const val EXTRA_SERVER_IP = "extra_server_ip"
         const val EXTRA_MEDIA_COMMAND = "extra_media_command"
+        const val EXTRA_NOTIFICATION_ID = "extra_notification_id"
 
         private const val CHANNEL_ID = "axon_bridge"
         private const val NOTIFICATION_ID = 10_001

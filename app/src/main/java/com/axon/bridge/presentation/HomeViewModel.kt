@@ -1,6 +1,7 @@
 package com.axon.bridge.presentation
 
 import android.app.Application
+import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
@@ -165,6 +166,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         startSettingsIntent(intent)
     }
 
+    fun openFullScreenCallSettings() {
+        DiagnosticsLog.add("Opening full-screen call alert settings")
+        val intent = if (Build.VERSION.SDK_INT >= 34) {
+            Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                data = Uri.parse("package:${appContext.packageName}")
+            }
+        } else {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                if (Build.VERSION.SDK_INT >= 26) {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, appContext.packageName)
+                } else {
+                    data = Uri.parse("package:${appContext.packageName}")
+                }
+            }
+        }.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startSettingsIntent(intent)
+    }
+
     fun openAppDetailsSettings() {
         val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
             data = Uri.parse("package:${appContext.packageName}")
@@ -239,6 +260,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         refresh()
     }
 
+    fun deleteCallLogs(callIds: Set<String>) {
+        if (callIds.isEmpty()) return
+        CallAlertStore.delete(appContext, callIds)
+        DiagnosticsLog.add("Deleted ${callIds.size} call log(s)")
+        refresh()
+    }
+
     fun clearCallLogs() {
         CallAlertStore.clear(appContext)
         DiagnosticsLog.add("Cleared call logs")
@@ -309,11 +337,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val readPhoneStateGranted = appContext.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
         val readCallLogGranted = appContext.checkSelfPermission(android.Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
         val batteryOptimized = isIgnoringBatteryOptimizations()
+        val fullScreenCallGranted = canUseFullScreenCallAlerts()
 
         val notificationAccessStatus = when {
             role == BridgeRole.Sink -> PermissionStatus("Notification access", "Sender only", true)
             notificationAccess -> PermissionStatus("Notification access", "Granted", true)
             else -> PermissionStatus("Notification access", "Needs review", false)
+        }
+        val fullScreenCallStatus = when {
+            role == BridgeRole.Source -> PermissionStatus("Full-screen calls", "Receiver only", true)
+            fullScreenCallGranted -> PermissionStatus("Full-screen calls", "Granted", true)
+            else -> PermissionStatus("Full-screen calls", "Needs approval", false)
         }
 
         return listOf(
@@ -323,6 +357,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             PermissionStatus("Call details", if (readCallLogGranted) "Granted" else "Denied", readCallLogGranted),
             PermissionStatus("Contacts lookup", if (readContactsGranted) "Granted" else "Denied", readContactsGranted),
             PermissionStatus("App notifications", if (postNotificationsGranted) "Granted" else "Denied", postNotificationsGranted),
+            fullScreenCallStatus,
             PermissionStatus("Battery protection", if (batteryOptimized) "Granted" else "Restricted", batteryOptimized),
             PermissionStatus("Device role", role.displayLabel(), true)
         )
@@ -346,6 +381,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private fun isIgnoringBatteryOptimizations(): Boolean {
         val powerManager = appContext.getSystemService(PowerManager::class.java)
         return powerManager?.isIgnoringBatteryOptimizations(appContext.packageName) == true
+    }
+
+    private fun canUseFullScreenCallAlerts(): Boolean {
+        return Build.VERSION.SDK_INT < 34 ||
+            appContext.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() == true
     }
 
     fun requestBatteryExemption() {

@@ -80,6 +80,17 @@ object CallAlertStore {
         }
     }
 
+    fun delete(context: Context, callIds: Set<String>) {
+        if (callIds.isEmpty()) return
+        init(context)
+        val next = mutableCalls.value.filterNot { it.id in callIds }
+        mutableCalls.value = next
+        save(context, next)
+        if (mutableActiveCall.value?.id in callIds) {
+            mutableActiveCall.value = null
+        }
+    }
+
     fun clear(context: Context) {
         init(context)
         mutableCalls.value = emptyList()

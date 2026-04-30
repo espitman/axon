@@ -65,7 +65,6 @@ import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Notifications
@@ -385,6 +384,7 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                         onOpenNotificationAccess = viewModel::openPermissionSettings,
                         onRestartNotificationListener = viewModel::restartNotificationListener,
                         onOpenNotificationSettings = viewModel::openAppNotificationSettings,
+                        onOpenFullScreenCallSettings = viewModel::openFullScreenCallSettings,
                         onRequestBattery = viewModel::requestBatteryExemption,
                         onOpenAppDetails = viewModel::openAppDetailsSettings
                     )
@@ -415,8 +415,7 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                         CallsScreen(
                             calls = state.callLogs,
                             onBack = { currentPage = AxonPage.Home },
-                            onClearAll = viewModel::clearCallLogs,
-                            onDeleteCall = viewModel::deleteCallLog
+                            onDeleteCalls = viewModel::deleteCallLogs
                         )
                     }
                     AxonPage.Home -> {
@@ -995,21 +994,59 @@ private fun MediaControlButton(
 private fun CallsScreen(
     calls: List<CallLogEntry>,
     onBack: () -> Unit,
-    onClearAll: () -> Unit,
-    onDeleteCall: (String) -> Unit
+    onDeleteCalls: (Set<String>) -> Unit
 ) {
+    var selectedCallIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var isDeleteDialogOpen by remember { mutableStateOf(false) }
+    val isSelecting = selectedCallIds.isNotEmpty()
+
+    fun toggleCall(callId: String) {
+        selectedCallIds = if (callId in selectedCallIds) {
+            selectedCallIds - callId
+        } else {
+            selectedCallIds + callId
+        }
+    }
+
+    BackHandler(enabled = isSelecting) {
+        selectedCallIds = emptySet()
+    }
+
+    if (isDeleteDialogOpen) {
+        DeleteConfirmationDialog(
+            title = if (selectedCallIds.size == 1) "Delete call log?" else "Delete call logs?",
+            message = if (selectedCallIds.size == 1) {
+                "This call log will be removed from Axon on this receiver."
+            } else {
+                "${selectedCallIds.size} call logs will be removed from Axon on this receiver."
+            },
+            onDismiss = { isDeleteDialogOpen = false },
+            onConfirm = {
+                onDeleteCalls(selectedCallIds)
+                selectedCallIds = emptySet()
+                isDeleteDialogOpen = false
+            }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 20.dp, vertical = 14.dp)
     ) {
         PageHeader(
-            title = "Calls",
-            subtitle = if (calls.isEmpty()) "No mirrored calls yet" else "${calls.size} recent calls",
-            onBack = onBack,
-            actionIcon = if (calls.isNotEmpty()) Icons.Rounded.DeleteSweep else null,
-            actionContentDescription = "Clear call logs",
-            onAction = onClearAll
+            title = if (isSelecting) "${selectedCallIds.size} selected" else "Calls",
+            subtitle = if (isSelecting) "Call logs" else if (calls.isEmpty()) "No mirrored calls yet" else "${calls.size} recent calls",
+            onBack = {
+                if (isSelecting) {
+                    selectedCallIds = emptySet()
+                } else {
+                    onBack()
+                }
+            },
+            actionIcon = if (isSelecting) Icons.Rounded.Delete else null,
+            actionContentDescription = "Delete selected call logs",
+            onAction = { isDeleteDialogOpen = true }
         )
         LazyColumn(
             modifier = Modifier
@@ -1025,83 +1062,15 @@ private fun CallsScreen(
                 items(calls, key = { it.id }) { call ->
                     CallLogRow(
                         call = call,
-                        onDelete = { onDeleteCall(call.id) }
+                        selected = call.id in selectedCallIds,
+                        selectionMode = isSelecting,
+                        onClick = {
+                            if (isSelecting) {
+                                toggleCall(call.id)
+                            }
+                        },
+                        onLongClick = { toggleCall(call.id) }
                     )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CallLogPanel(
-    calls: List<CallLogEntry>,
-    onClearAll: () -> Unit,
-    onDeleteCall: (String) -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = AxonColor.Panel),
-        border = BorderStroke(1.dp, AxonColor.Border)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Calls",
-                        color = AxonColor.Text,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1
-                    )
-                    Text(
-                        text = if (calls.isEmpty()) "No mirrored calls yet" else "${calls.size} recent calls",
-                        color = AxonColor.Muted,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (calls.isNotEmpty()) {
-                        SmallIconAction(
-                            icon = Icons.Rounded.DeleteSweep,
-                            contentDescription = "Clear call logs",
-                            onClick = onClearAll,
-                            tint = AxonColor.Red
-                        )
-                    }
-                    StatusPill(
-                        text = calls.firstOrNull()?.state?.displayLabel()?.uppercase() ?: "IDLE",
-                        color = calls.firstOrNull()?.state?.statusColor() ?: AxonColor.Muted
-                    )
-                }
-            }
-
-            if (calls.isEmpty()) {
-                Text(
-                    text = "Incoming call alerts will appear here.",
-                    color = AxonColor.Muted,
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    calls.take(5).forEach { call ->
-                        CallLogRow(
-                            call = call,
-                            onDelete = { onDeleteCall(call.id) }
-                        )
-                    }
                 }
             }
         }
@@ -1152,17 +1121,29 @@ private fun EmptyCalls() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CallLogRow(
     call: CallLogEntry,
-    onDelete: () -> Unit
+    selected: Boolean,
+    selectionMode: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(AxonColor.PanelRaised)
-            .border(1.dp, AxonColor.Border, RoundedCornerShape(8.dp))
+            .background(if (selected) AxonColor.Amber.copy(alpha = 0.16f) else AxonColor.PanelRaised)
+            .border(
+                1.dp,
+                if (selected) AxonColor.Amber else AxonColor.Border,
+                RoundedCornerShape(8.dp)
+            )
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
             .padding(horizontal = 12.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -1190,41 +1171,28 @@ private fun CallLogRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            StatusPill(
-                text = call.state.displayLabel().uppercase(),
-                color = call.state.statusColor()
-            )
-            SmallIconAction(
-                icon = Icons.Rounded.Delete,
-                contentDescription = "Delete call",
-                onClick = onDelete,
-                tint = AxonColor.Red
-            )
+            if (selected) {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(AxonColor.Amber),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.CheckCircle,
+                        contentDescription = null,
+                        tint = Color(0xFF1C1304),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            } else if (!selectionMode) {
+                StatusPill(
+                    text = call.state.displayLabel().uppercase(),
+                    color = call.state.statusColor()
+                )
+            }
         }
-    }
-}
-
-@Composable
-private fun SmallIconAction(
-    icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-    tint: Color = AxonColor.Muted
-) {
-    IconButton(
-        onClick = onClick,
-        modifier = Modifier
-            .size(34.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(AxonColor.Panel)
-            .border(1.dp, AxonColor.Border, RoundedCornerShape(8.dp))
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = tint,
-            modifier = Modifier.size(18.dp)
-        )
     }
 }
 
@@ -2081,6 +2049,7 @@ private fun SettingsScreen(
     onOpenNotificationAccess: () -> Unit,
     onRestartNotificationListener: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
+    onOpenFullScreenCallSettings: () -> Unit,
     onRequestBattery: () -> Unit,
     onOpenAppDetails: () -> Unit
 ) {
@@ -2191,6 +2160,7 @@ private fun SettingsScreen(
                 onOpenNotificationAccess = onOpenNotificationAccess,
                 onRestartNotificationListener = onRestartNotificationListener,
                 onOpenNotificationSettings = onOpenNotificationSettings,
+                onOpenFullScreenCallSettings = onOpenFullScreenCallSettings,
                 onRequestBattery = onRequestBattery,
                 onOpenAppDetails = onOpenAppDetails
             )
@@ -2203,6 +2173,7 @@ private fun PermissionActions(
     onOpenNotificationAccess: () -> Unit,
     onRestartNotificationListener: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
+    onOpenFullScreenCallSettings: () -> Unit,
     onRequestBattery: () -> Unit,
     onOpenAppDetails: () -> Unit
 ) {
@@ -2237,16 +2208,26 @@ private fun PermissionActions(
                 modifier = Modifier.weight(1f)
             )
             CompactActionButton(
+                text = "Full-screen calls",
+                onClick = onOpenFullScreenCallSettings,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CompactActionButton(
                 text = "Battery",
                 onClick = onRequestBattery,
                 modifier = Modifier.weight(1f)
             )
+            CompactActionButton(
+                text = "System app settings",
+                onClick = onOpenAppDetails,
+                modifier = Modifier.weight(1f)
+            )
         }
-        CompactActionButton(
-            text = "System app settings",
-            onClick = onOpenAppDetails,
-            modifier = Modifier.fillMaxWidth()
-        )
         XiaomiGuidance()
     }
 }

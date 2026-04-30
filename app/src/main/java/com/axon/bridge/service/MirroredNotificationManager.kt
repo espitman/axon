@@ -28,6 +28,9 @@ class MirroredNotificationManager(
             return
         }
         createChannel()
+        if (payload.category == NotificationCategory.Call && !canUseFullScreenIntent()) {
+            DiagnosticsLog.add("Full-screen call alert denied by Android settings")
+        }
 
         val categoryLabel = when (payload.category) {
             NotificationCategory.Sms -> "SMS"
@@ -111,6 +114,11 @@ class MirroredNotificationManager(
                 context,
                 android.Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun canUseFullScreenIntent(): Boolean {
+        return Build.VERSION.SDK_INT < 34 ||
+            context.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() == true
     }
 
     private fun createChannel() {

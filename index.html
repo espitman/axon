@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Axon is a private Android-to-Android LAN bridge for SMS, calls, media controls, and watch mirroring."
+    />
+    <title>Axon - Local Android Bridge</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Axon home">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>
+          <strong>Axon</strong>
+          <small>Local Android Bridge</small>
+        </span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#features">Features</a>
+        <a href="#setup">Setup</a>
+        <a href="#permissions">Permissions</a>
+        <a href="#limits">Limits</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Private LAN bridge for your own devices</p>
+          <h1>Mirror Android SMS, calls, and media controls without a cloud relay.</h1>
+          <p class="lede">
+            Axon connects a Sender phone and a Receiver phone over your local network. The Receiver
+            shows mirrored alerts, keeps a local inbox, and exposes notifications and media controls
+            to a connected watch through Android's normal system pipeline.
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="https://github.com/espitman/axon/releases">Get APK</a>
+            <a class="button secondary" href="https://github.com/espitman/axon">View source</a>
+          </div>
+        </div>
+
+        <div class="signal-map" aria-label="Axon Sender to Receiver bridge diagram">
+          <div class="device sender">
+            <span class="node-label">Sender</span>
+            <strong>SMS, Calls, Media</strong>
+            <small>Original Android phone</small>
+          </div>
+          <div class="pulse-line">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="device receiver">
+            <span class="node-label">Receiver</span>
+            <strong>Inbox, Alerts, Watch</strong>
+            <small>Local WebSocket server</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="notice">
+        <strong>Current status:</strong>
+        Axon is built for private, trusted-network use. Pairing, encryption, and multi-user hardening
+        are intentionally not part of the current release.
+      </section>
+
+      <section id="features" class="section">
+        <div class="section-heading">
+          <p class="eyebrow">What it does</p>
+          <h2>One bridge, two roles.</h2>
+        </div>
+        <div class="grid three">
+          <article class="card">
+            <h3>SMS mirror and inbox</h3>
+            <p>
+              Sender captures SMS events directly and resolves contact names when allowed. Receiver
+              stores messages in a local thread-based inbox with unread badges and Persian-friendly text rendering.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Call mirroring</h3>
+            <p>
+              Incoming and ongoing call state is mirrored to Receiver. Receiver can show a full-screen
+              call alert, keep a call log, and send an experimental reject command back to Sender.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Media and watch controls</h3>
+            <p>
+              Sender streams active media metadata and artwork. Receiver creates a shadow media session
+              so phone, notification, and watch controls can route commands back to Sender.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section split">
+        <div>
+          <p class="eyebrow">Architecture</p>
+          <h2>Local by design.</h2>
+          <p>
+            Axon uses Ktor WebSockets over LAN. Receiver hosts the bridge on port <code>8080</code>;
+            Sender discovers or connects to it and sends structured JSON events. There is no Axon server.
+          </p>
+        </div>
+        <pre class="diagram" aria-label="Technical flow"><code>Sender Android phone
+  SMS / Call / Media source
+        |
+        v
+  Ktor WebSocket client
+        |
+     LAN Wi-Fi
+        |
+        v
+  Ktor WebSocket server
+        |
+        v
+Receiver notifications
+Inbox, call screen, watch bridge</code></pre>
+      </section>
+
+      <section id="setup" class="section">
+        <div class="section-heading">
+          <p class="eyebrow">Setup</p>
+          <h2>Install on both Android phones.</h2>
+        </div>
+        <div class="steps">
+          <article>
+            <span>1</span>
+            <h3>Start Receiver</h3>
+            <p>Install Axon on the phone that should show alerts and connect to your watch. Select Receiver mode and start the bridge.</p>
+          </article>
+          <article>
+            <span>2</span>
+            <h3>Start Sender</h3>
+            <p>Install Axon on the phone that receives the real SMS, calls, and media playback. Select Sender mode.</p>
+          </article>
+          <article>
+            <span>3</span>
+            <h3>Connect locally</h3>
+            <p>Use network scan or manual IP entry. Both phones must be on the same trusted LAN or hotspot network.</p>
+          </article>
+          <article>
+            <span>4</span>
+            <h3>Allow watch alerts</h3>
+            <p>In your watch companion app, allow notifications from Axon. Watch controls use Android's normal notification and media-session paths.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="permissions" class="section">
+        <div class="section-heading">
+          <p class="eyebrow">Android permissions</p>
+          <h2>Why Axon asks for sensitive access.</h2>
+        </div>
+        <div class="permission-table">
+          <div><strong>POST_NOTIFICATIONS</strong><span>Receiver shows mirrored SMS and call notifications.</span></div>
+          <div><strong>RECEIVE_SMS</strong><span>Sender receives SMS through Android's direct broadcast path.</span></div>
+          <div><strong>READ_CONTACTS</strong><span>Sender resolves phone numbers to local contact names.</span></div>
+          <div><strong>READ_PHONE_STATE</strong><span>Sender tracks call state such as ringing, in-call, and ended.</span></div>
+          <div><strong>READ_CALL_LOG</strong><span>Sender can enrich call details when Android provides them.</span></div>
+          <div><strong>ANSWER_PHONE_CALLS</strong><span>Sender attempts experimental reject-call commands from Receiver.</span></div>
+          <div><strong>USE_FULL_SCREEN_INTENT</strong><span>Receiver can request full-screen call alerts on Android versions that allow it.</span></div>
+          <div><strong>Notification access</strong><span>Optional Sender path for notification-based mirroring and media-session discovery.</span></div>
+        </div>
+      </section>
+
+      <section id="limits" class="section split">
+        <div>
+          <p class="eyebrow">Security and limits</p>
+          <h2>Use Axon on networks you trust.</h2>
+          <p>
+            The current release intentionally prioritizes local utility over security. It does not
+            yet implement pairing, encryption, identity verification, or revocation. Use it only on
+            trusted private networks.
+          </p>
+        </div>
+        <div class="card list-card">
+          <h3>Known limitations</h3>
+          <ul>
+            <li>Full-screen call alerts depend on Android and OEM settings.</li>
+            <li>Reject call is experimental and may return false on some devices.</li>
+            <li>Watch behavior depends on the phone companion app and its allowlist.</li>
+            <li>Local archive data stays on the Receiver; it is not a system SMS database.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-heading">
+          <p class="eyebrow">Troubleshooting</p>
+          <h2>Fast checks when something does not mirror.</h2>
+        </div>
+        <div class="grid two">
+          <article class="card">
+            <h3>Receiver gets SMS but watch does not</h3>
+            <p>
+              The Axon bridge is working. Open the watch companion app and allow notifications from
+              Axon, then check battery restrictions for the companion app.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Network scan finds nothing</h3>
+            <p>
+              Confirm both devices are on the same subnet, disable VPN/proxy, and try manual IP.
+              Sender also retries discovery after Wi-Fi changes while the bridge is active.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Watch media buttons do nothing</h3>
+            <p>
+              Check Receiver diagnostics for the shadow media session and silent playback anchor.
+              Axon uses these so watch controls route into the Receiver media session.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Full-screen call does not appear</h3>
+            <p>
+              On Receiver, allow full-screen call alerts in Android settings and keep the Incoming
+              Calls notification channel at high priority.
+            </p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span class="brand-mark small" aria-hidden="true"></span>
+      <p>Axon is an experimental private Android bridge. Built for local-first control, not cloud sync.</p>
+      <a href="https://github.com/espitman/axon">github.com/espitman/axon</a>
+    </footer>
+  </body>
+</html>

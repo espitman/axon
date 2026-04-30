@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.view.View
+import android.widget.RemoteViews
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -73,6 +75,18 @@ class MirroredNotificationManager(
             null
         }
         val channelId = if (payload.category == NotificationCategory.Call) CALL_CHANNEL_ID else CHANNEL_ID
+        val compactView = notificationView(
+            layoutId = R.layout.notification_axon_compact,
+            payload = payload,
+            categoryLabel = categoryLabel,
+            rejectIntent = null
+        )
+        val expandedView = notificationView(
+            layoutId = R.layout.notification_axon_expanded,
+            payload = payload,
+            categoryLabel = categoryLabel,
+            rejectIntent = rejectIntent
+        )
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_axon_mark)
             .setContentTitle(payload.title)
@@ -98,6 +112,9 @@ class MirroredNotificationManager(
             .setAutoCancel(payload.category != NotificationCategory.Call)
             .setWhen(payload.postedTime)
             .setShowWhen(true)
+            .setCustomContentView(compactView)
+            .setCustomBigContentView(expandedView)
+            .setCustomHeadsUpContentView(expandedView)
             .extend(NotificationCompat.WearableExtender())
             .apply {
                 if (fullScreenIntent != null) {
@@ -143,6 +160,36 @@ class MirroredNotificationManager(
                 context,
                 android.Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun notificationView(
+        layoutId: Int,
+        payload: NotificationPayload,
+        categoryLabel: String,
+        rejectIntent: PendingIntent?
+    ): RemoteViews {
+        val message = payload.message.ifBlank {
+            "Mirrored $categoryLabel from ${payload.originDevice}"
+        }
+        return RemoteViews(context.packageName, layoutId).apply {
+            setTextViewText(R.id.axon_notification_title, payload.title.ifBlank { "Axon" })
+            setTextViewText(R.id.axon_notification_message, message)
+            setTextViewText(R.id.axon_notification_badge, categoryLabel.uppercase())
+            runCatching {
+                setTextViewText(
+                    R.id.axon_notification_origin,
+                    payload.originDevice.ifBlank { "Axon bridge" }
+                )
+            }
+            runCatching {
+                if (payload.category == NotificationCategory.Call && rejectIntent != null) {
+                    setViewVisibility(R.id.axon_notification_reject, View.VISIBLE)
+                    setOnClickPendingIntent(R.id.axon_notification_reject, rejectIntent)
+                } else {
+                    setViewVisibility(R.id.axon_notification_reject, View.GONE)
+                }
+            }
+        }
     }
 
     private fun canUseFullScreenIntent(): Boolean {

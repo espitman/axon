@@ -9,7 +9,8 @@ data class BridgeMessage(
     val payload: NotificationPayload? = null,
     val hello: HelloPayload? = null,
     val media: MediaPayload? = null,
-    val command: MediaCommandPayload? = null
+    val command: MediaCommandPayload? = null,
+    val callCommand: CallCommandPayload? = null
 )
 
 @Serializable
@@ -33,7 +34,10 @@ enum class BridgeMessageType {
     MediaCommand,
 
     @SerialName("MEDIA_CLEAR")
-    MediaClear
+    MediaClear,
+
+    @SerialName("CALL_COMMAND")
+    CallCommand
 }
 
 @Serializable
@@ -81,6 +85,17 @@ data class MediaPayload(
 data class MediaCommandPayload(
     val action: MediaCommandAction
 )
+
+@Serializable
+data class CallCommandPayload(
+    val action: CallCommandAction
+)
+
+@Serializable
+enum class CallCommandAction {
+    @SerialName("REJECT")
+    Reject
+}
 
 @Serializable
 enum class MediaCommandAction {

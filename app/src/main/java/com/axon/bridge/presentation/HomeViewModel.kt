@@ -18,6 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import com.axon.bridge.data.AxonSettings
 import com.axon.bridge.data.BridgeCommandBus
+import com.axon.bridge.data.CallBridgeBus
 import com.axon.bridge.data.CallAlertStore
 import com.axon.bridge.data.DeviceInfoProvider
 import com.axon.bridge.data.DiagnosticsLog
@@ -27,6 +28,8 @@ import com.axon.bridge.data.ReceiverDiscoveryScanner
 import com.axon.bridge.data.SmsArchiveStore
 import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
+import com.axon.bridge.domain.CallCommandAction
+import com.axon.bridge.domain.CallCommandPayload
 import com.axon.bridge.domain.DiscoveredReceiver
 import com.axon.bridge.domain.HomeState
 import com.axon.bridge.domain.MediaCommandAction
@@ -254,6 +257,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         refresh()
     }
 
+    fun rejectActiveCall() {
+        CallBridgeBus.publishCommand(CallCommandPayload(CallCommandAction.Reject))
+        DiagnosticsLog.add("Call reject command requested")
+        CallAlertStore.clearActive()
+        refresh()
+    }
+
     fun deleteCallLog(callId: String) {
         CallAlertStore.delete(appContext, callId)
         DiagnosticsLog.add("Deleted call log")
@@ -336,6 +346,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val readContactsGranted = appContext.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
         val readPhoneStateGranted = appContext.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
         val readCallLogGranted = appContext.checkSelfPermission(android.Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
+        val answerPhoneCallsGranted = appContext.checkSelfPermission(android.Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED
         val batteryOptimized = isIgnoringBatteryOptimizations()
         val fullScreenCallGranted = canUseFullScreenCallAlerts()
 
@@ -355,6 +366,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             PermissionStatus("SMS receiver", if (receiveSmsGranted) "Granted" else "Denied", receiveSmsGranted),
             PermissionStatus("Call receiver", if (readPhoneStateGranted) "Granted" else "Denied", readPhoneStateGranted),
             PermissionStatus("Call details", if (readCallLogGranted) "Granted" else "Denied", readCallLogGranted),
+            PermissionStatus("Call control", if (answerPhoneCallsGranted) "Granted" else "Denied", answerPhoneCallsGranted),
             PermissionStatus("Contacts lookup", if (readContactsGranted) "Granted" else "Denied", readContactsGranted),
             PermissionStatus("App notifications", if (postNotificationsGranted) "Granted" else "Denied", postNotificationsGranted),
             fullScreenCallStatus,

@@ -4,6 +4,7 @@ import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeMessage
 import com.axon.bridge.domain.BridgeMessageType
 import com.axon.bridge.domain.BridgeRole
+import com.axon.bridge.domain.CallCommandPayload
 import com.axon.bridge.domain.DiscoveryResponse
 import com.axon.bridge.domain.HelloPayload
 import com.axon.bridge.domain.MediaCommandPayload
@@ -48,7 +49,8 @@ class BridgeTransport(
     private val onNotificationReceived: (NotificationPayload) -> Unit,
     private val onMediaUpdateReceived: (MediaPayload) -> Unit = {},
     private val onMediaCommandReceived: (MediaCommandPayload) -> Unit = {},
-    private val onMediaCleared: () -> Unit = {}
+    private val onMediaCleared: () -> Unit = {},
+    private val onCallCommandReceived: (CallCommandPayload) -> Unit = {}
 ) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -84,6 +86,7 @@ class BridgeTransport(
                     onStateChanged(BridgeConnectionState.Connected, null)
                     sendHello(BridgeRole.Sink)
                     val commandJob = launchMediaCommandSender()
+                    val callCommandJob = launchCallCommandSender()
                     val pingJob = launchPingSender()
                     try {
                         for (frame in incoming) {
@@ -93,6 +96,7 @@ class BridgeTransport(
                         }
                     } finally {
                         commandJob.cancelAndJoin()
+                        callCommandJob.cancelAndJoin()
                         pingJob.cancelAndJoin()
                         onMediaCleared()
                         if (server != null) {
@@ -242,6 +246,12 @@ class BridgeTransport(
                 DiagnosticsLog.add("Media clear received")
                 onMediaCleared()
             }
+            BridgeMessageType.CallCommand -> {
+                message.callCommand?.let { command ->
+                    DiagnosticsLog.add("Call command received: ${command.action.name}")
+                    onCallCommandReceived(command)
+                }
+            }
         }
     }
 
@@ -294,6 +304,24 @@ class BridgeTransport(
                 )
                 DiagnosticsLog.add("Sent media clear")
                 onEventTransferred()
+            }
+        }
+    }
+
+    private fun io.ktor.websocket.WebSocketSession.launchCallCommandSender(): Job {
+        return scope.launch {
+            CallBridgeBus.commands.collect { payload ->
+                send(
+                    Frame.Text(
+                        json.encodeToString(
+                            BridgeMessage(
+                                type = BridgeMessageType.CallCommand,
+                                callCommand = payload
+                            )
+                        )
+                    )
+                )
+                DiagnosticsLog.add("Sent call command: ${payload.action.name}")
             }
         }
     }

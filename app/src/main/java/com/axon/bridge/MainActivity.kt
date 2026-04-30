@@ -124,6 +124,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
+import com.axon.bridge.domain.CallCommandAction
+import com.axon.bridge.domain.CallCommandPayload
 import com.axon.bridge.domain.CallLogEntry
 import com.axon.bridge.domain.CallState
 import com.axon.bridge.domain.DiscoveredReceiver
@@ -135,6 +137,8 @@ import com.axon.bridge.domain.SmsArchiveMessage
 import com.axon.bridge.domain.SmsThread
 import com.axon.bridge.presentation.HomeViewModel
 import com.axon.bridge.data.CallAlertStore
+import com.axon.bridge.data.CallBridgeBus
+import com.axon.bridge.data.DiagnosticsLog
 import com.axon.bridge.service.MirroredNotificationManager
 import java.text.DateFormat
 import java.util.Date
@@ -222,6 +226,14 @@ class MainActivity : ComponentActivity() {
             permissions += Manifest.permission.READ_CALL_LOG
         }
 
+        val answerPhoneCallsGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ANSWER_PHONE_CALLS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!answerPhoneCallsGranted) {
+            permissions += Manifest.permission.ANSWER_PHONE_CALLS
+        }
+
         if (permissions.isNotEmpty()) {
             ActivityCompat.requestPermissions(
                 this,
@@ -266,6 +278,16 @@ class CallActivity : ComponentActivity() {
                     caller = callTitle,
                     message = callMessage,
                     originDevice = originDevice,
+                    onReject = {
+                        CallBridgeBus.publishCommand(CallCommandPayload(CallCommandAction.Reject))
+                        DiagnosticsLog.add("Call reject command requested")
+                        if (notificationId != 0) {
+                            NotificationManagerCompat.from(this).cancel(notificationId)
+                        }
+                        getSystemService(NotificationManager::class.java)?.cancel(notificationId)
+                        CallAlertStore.clearActive()
+                        finish()
+                    },
                     onDismiss = {
                         if (notificationId != 0) {
                             NotificationManagerCompat.from(this).cancel(notificationId)
@@ -523,12 +545,16 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
             }
 
             state.activeCall?.let { call ->
-                IncomingCallScreen(
-                    caller = call.title,
-                    message = call.message,
-                    originDevice = call.originDevice,
-                    onDismiss = { dismissCall(call) }
-                )
+            IncomingCallScreen(
+                caller = call.title,
+                message = call.message,
+                originDevice = call.originDevice,
+                onReject = {
+                    viewModel.rejectActiveCall()
+                    dismissCall(call)
+                },
+                onDismiss = { dismissCall(call) }
+            )
             }
         }
     }
@@ -1917,6 +1943,7 @@ private fun IncomingCallScreen(
     caller: String,
     message: String,
     originDevice: String,
+    onReject: () -> Unit,
     onDismiss: () -> Unit
 ) {
     Box(
@@ -2012,7 +2039,7 @@ private fun IncomingCallScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Button(
-                    onClick = onDismiss,
+                    onClick = onReject,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
@@ -2023,9 +2050,27 @@ private fun IncomingCallScreen(
                     )
                 ) {
                     Text(
-                        text = "Dismiss",
+                        text = "Reject",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AxonColor.PanelRaised,
+                        contentColor = AxonColor.Text
+                    )
+                ) {
+                    Text(
+                        text = "Dismiss",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1
                     )
                 }

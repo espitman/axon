@@ -1,11 +1,13 @@
 package com.axon.bridge.service
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -13,6 +15,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
+import android.telecom.TelecomManager
 import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
 import com.axon.bridge.CallActivity
@@ -28,6 +31,8 @@ import com.axon.bridge.data.NetworkInfoProvider
 import com.axon.bridge.data.ReceiverDiscoveryScanner
 import com.axon.bridge.data.ShadowMediaSession
 import com.axon.bridge.data.SmsArchiveStore
+import com.axon.bridge.domain.CallCommandAction
+import com.axon.bridge.domain.CallCommandPayload
 import com.axon.bridge.domain.CallState
 import com.axon.bridge.domain.MediaCommandAction
 import com.axon.bridge.domain.MediaCommandPayload
@@ -133,6 +138,9 @@ class BridgeService : Service() {
             },
             onMediaCleared = {
                 clearMedia()
+            },
+            onCallCommandReceived = { command ->
+                handleCallCommand(command)
             }
         )
     }
@@ -333,6 +341,32 @@ class BridgeService : Service() {
 
         DiagnosticsLog.add("Media notification command: $action")
         MediaBridgeBus.publishCommand(MediaCommandPayload(action))
+    }
+
+    private fun handleCallCommand(command: CallCommandPayload) {
+        when (command.action) {
+            CallCommandAction.Reject -> rejectActivePhoneCall()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun rejectActivePhoneCall() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            DiagnosticsLog.add("Call reject unsupported before Android 9")
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.ANSWER_PHONE_CALLS) != PackageManager.PERMISSION_GRANTED) {
+            DiagnosticsLog.add("Call reject failed: ANSWER_PHONE_CALLS denied")
+            return
+        }
+        val telecomManager = getSystemService(TelecomManager::class.java)
+        val rejected = runCatching {
+            telecomManager?.endCall() == true
+        }.onFailure { error ->
+            DiagnosticsLog.add("Call reject failed: ${error.message ?: error::class.simpleName}")
+        }.getOrDefault(false)
+
+        DiagnosticsLog.add(if (rejected) "Call reject requested on sender" else "Call reject returned false")
     }
 
     private fun handleNotificationPayload(payload: NotificationPayload) {

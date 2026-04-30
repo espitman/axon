@@ -6,6 +6,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -14,12 +17,15 @@ import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
 import com.axon.bridge.CallActivity
 import com.axon.bridge.R
+import com.axon.bridge.data.AxonSettings
 import com.axon.bridge.data.BridgeTransport
 import com.axon.bridge.data.CallAlertStore
 import com.axon.bridge.data.DeviceInfoProvider
 import com.axon.bridge.data.DiagnosticsLog
 import com.axon.bridge.data.MediaBridgeBus
 import com.axon.bridge.data.MediaSessionTracker
+import com.axon.bridge.data.NetworkInfoProvider
+import com.axon.bridge.data.ReceiverDiscoveryScanner
 import com.axon.bridge.data.ShadowMediaSession
 import com.axon.bridge.data.SmsArchiveStore
 import com.axon.bridge.domain.CallState
@@ -32,8 +38,12 @@ import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.SupervisorJob
 
@@ -44,13 +54,41 @@ class BridgeService : Service() {
     private lateinit var mediaNotificationManager: MediaNotificationManager
     private lateinit var mediaSessionTracker: MediaSessionTracker
     private lateinit var shadowMediaSession: ShadowMediaSession
+    private lateinit var settings: AxonSettings
+    private lateinit var networkInfoProvider: NetworkInfoProvider
+    private lateinit var receiverDiscoveryScanner: ReceiverDiscoveryScanner
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallbackRegistered = false
+    private var autoDiscoveryJob: Job? = null
+    private var currentRole = BridgeRole.Sink
+    private var lastObservedNetwork: Network? = null
+    private var lastObservedLocalIp = ""
     private var wakeLock: PowerManager.WakeLock? = null
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            handleNetworkMaybeChanged("Wi-Fi available", network)
+        }
+
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+            if (networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                handleNetworkMaybeChanged("Wi-Fi capabilities changed", network)
+            }
+        }
+
+        override fun onLost(network: Network) {
+            handleNetworkMaybeChanged("Wi-Fi lost", network)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         SmsArchiveStore.init(this)
         CallAlertStore.init(this)
+        settings = AxonSettings(this)
+        networkInfoProvider = NetworkInfoProvider(this)
+        receiverDiscoveryScanner = ReceiverDiscoveryScanner(this)
         mirroredNotificationManager = MirroredNotificationManager(this)
         mediaNotificationManager = MediaNotificationManager(this)
         mediaSessionTracker = MediaSessionTracker(
@@ -129,6 +167,7 @@ class BridgeService : Service() {
             BridgeRole.valueOf(intent?.getStringExtra(EXTRA_ROLE).orEmpty())
         }.getOrDefault(BridgeRole.Sink)
         val serverIp = intent?.getStringExtra(EXTRA_SERVER_IP).orEmpty().trim()
+        currentRole = role
         mutableActiveTargetIp.value = serverIp
 
         updateState(BridgeConnectionState.Connecting, null)
@@ -139,17 +178,26 @@ class BridgeService : Service() {
 
         when (role) {
             BridgeRole.Sink -> {
+                stopAutoDiscovery()
+                unregisterNetworkCallback()
                 shadowMediaSession.start()
                 transport.startServer(host = "0.0.0.0")
             }
             BridgeRole.Source -> {
+                registerNetworkCallback()
                 mediaSessionTracker.start()
-                transport.startClient(serverIp)
+                if (serverIp.isBlank()) {
+                    startAutoDiscovery("Receiver IP missing")
+                } else {
+                    transport.startClient(serverIp)
+                }
             }
         }
     }
 
     private fun stopBridge() {
+        stopAutoDiscovery()
+        unregisterNetworkCallback()
         mediaSessionTracker.stop()
         shadowMediaSession.stop()
         mediaNotificationManager.cancel()
@@ -160,6 +208,94 @@ class BridgeService : Service() {
         updateState(BridgeConnectionState.Disconnected, null, running = false)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    private fun registerNetworkCallback() {
+        if (networkCallbackRegistered) return
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return
+        connectivityManager = manager
+        lastObservedNetwork = manager.activeNetwork
+        lastObservedLocalIp = networkInfoProvider.localIpAddress()
+        runCatching {
+            manager.registerDefaultNetworkCallback(networkCallback)
+            networkCallbackRegistered = true
+            DiagnosticsLog.add("Auto discovery watching Wi-Fi changes")
+        }.onFailure { error ->
+            DiagnosticsLog.add("Wi-Fi watcher failed: ${error.message ?: error::class.simpleName}")
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        if (!networkCallbackRegistered) return
+        runCatching {
+            connectivityManager?.unregisterNetworkCallback(networkCallback)
+        }
+        networkCallbackRegistered = false
+        connectivityManager = null
+        lastObservedNetwork = null
+        lastObservedLocalIp = ""
+    }
+
+    private fun handleNetworkMaybeChanged(reason: String, network: Network) {
+        if (currentRole != BridgeRole.Source || !mutableIsRunning.value) return
+        if (!activeNetworkIsWifi()) return
+        val localIp = networkInfoProvider.localIpAddress()
+        if (localIp.isBlank()) return
+        val networkChanged = network != lastObservedNetwork
+        val ipChanged = localIp != lastObservedLocalIp
+        if (!networkChanged && !ipChanged && mutableActiveTargetIp.value.isNotBlank()) return
+        lastObservedNetwork = network
+        lastObservedLocalIp = localIp
+        startAutoDiscovery(reason)
+    }
+
+    private fun activeNetworkIsWifi(): Boolean {
+        val manager = connectivityManager ?: getSystemService(ConnectivityManager::class.java) ?: return false
+        val activeNetwork = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    private fun startAutoDiscovery(reason: String) {
+        if (currentRole != BridgeRole.Source) return
+        if (autoDiscoveryJob?.isActive == true) {
+            DiagnosticsLog.add("Auto discovery already running")
+            return
+        }
+        autoDiscoveryJob = serviceScope.launch {
+            val deadline = SystemClock.elapsedRealtime() + AUTO_DISCOVERY_WINDOW_MS
+            var attempt = 1
+            updateState(BridgeConnectionState.Connecting, "Scanning for receiver on Wi-Fi")
+            while (isActive && currentRole == BridgeRole.Source && SystemClock.elapsedRealtime() <= deadline) {
+                DiagnosticsLog.add("Auto discovery attempt $attempt: $reason")
+                val receivers = receiverDiscoveryScanner.scan()
+                val receiver = receivers.firstOrNull()
+                if (receiver != null) {
+                    settings.serverIp = receiver.ip
+                    mutableActiveTargetIp.value = receiver.ip
+                    DiagnosticsLog.add("Auto discovery found ${receiver.deviceName}: ${receiver.ip}")
+                    startForeground(NOTIFICATION_ID, buildNotification(BridgeRole.Source, receiver.ip))
+                    transport.startClient(receiver.ip, receiver.port)
+                    sendStateChangedBroadcast()
+                    return@launch
+                }
+
+                attempt += 1
+                if (SystemClock.elapsedRealtime() + AUTO_DISCOVERY_RETRY_DELAY_MS > deadline) break
+                DiagnosticsLog.add("Auto discovery found no receiver; retrying")
+                delay(AUTO_DISCOVERY_RETRY_DELAY_MS)
+            }
+
+            DiagnosticsLog.add("Auto discovery timed out after 2 minutes")
+            if (currentRole == BridgeRole.Source && mutableConnectionState.value != BridgeConnectionState.Connected) {
+                updateState(BridgeConnectionState.Error, "No receiver found on this Wi-Fi")
+            }
+        }
+    }
+
+    private fun stopAutoDiscovery() {
+        autoDiscoveryJob?.cancel()
+        autoDiscoveryJob = null
     }
 
     private fun buildNotification(role: BridgeRole, serverIp: String): Notification {
@@ -324,6 +460,8 @@ class BridgeService : Service() {
     }
 
     override fun onDestroy() {
+        stopAutoDiscovery()
+        unregisterNetworkCallback()
         mediaSessionTracker.stop()
         shadowMediaSession.release()
         mediaNotificationManager.cancel()
@@ -350,6 +488,8 @@ class BridgeService : Service() {
 
         private const val CHANNEL_ID = "axon_bridge"
         private const val NOTIFICATION_ID = 10_001
+        private const val AUTO_DISCOVERY_WINDOW_MS = 120_000L
+        private const val AUTO_DISCOVERY_RETRY_DELAY_MS = 10_000L
 
         private val mutableConnectionState = MutableStateFlow(BridgeConnectionState.Disconnected)
         private val mutableIsRunning = MutableStateFlow(false)

@@ -114,6 +114,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -124,6 +125,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
+import com.axon.bridge.domain.BridgeTransportMode
 import com.axon.bridge.domain.CallCommandAction
 import com.axon.bridge.domain.CallCommandPayload
 import com.axon.bridge.domain.CallLogEntry
@@ -133,6 +135,7 @@ import com.axon.bridge.domain.HomeState
 import com.axon.bridge.domain.MediaCommandAction
 import com.axon.bridge.domain.MediaPayload
 import com.axon.bridge.domain.NotificationPayload
+import com.axon.bridge.domain.NtfySettings
 import com.axon.bridge.domain.SmsArchiveMessage
 import com.axon.bridge.domain.SmsThread
 import com.axon.bridge.presentation.HomeViewModel
@@ -399,7 +402,12 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                 when (page) {
                     AxonPage.Settings -> {
                     SettingsScreen(
+                        state = state,
                         diagnostics = state.diagnostics,
+                        onTransportModeSelected = viewModel::selectTransportMode,
+                        onNtfySettingsChanged = viewModel::updateNtfySettings,
+                        onGenerateNtfyPairId = viewModel::generateNtfyPairId,
+                        onTestNtfyConnection = viewModel::testNtfyConnection,
                         onBack = { currentPage = AxonPage.Home },
                         onPing = viewModel::pingPeer,
                         onClearDiagnostics = viewModel::clearDiagnostics,
@@ -465,7 +473,7 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                             verticalArrangement = Arrangement.spacedBy(18.dp)
                         ) {
                             ConnectionPanel(state = state)
-                            if (state.role == BridgeRole.Source) {
+                            if (state.role == BridgeRole.Source && state.transportMode == BridgeTransportMode.Lan) {
                                 CompactActionButton(
                                     text = "Scan network",
                                     onClick = {
@@ -496,7 +504,7 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                 }
             }
 
-            if (currentPage == AxonPage.Home && isScanDialogOpen) {
+            if (currentPage == AxonPage.Home && isScanDialogOpen && state.transportMode == BridgeTransportMode.Lan) {
                 Dialog(
                     onDismissRequest = {
                         isScanDialogOpen = false
@@ -525,7 +533,7 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                 }
             }
 
-            if (currentPage == AxonPage.Home && isManualIpSheetOpen) {
+            if (currentPage == AxonPage.Home && isManualIpSheetOpen && state.transportMode == BridgeTransportMode.Lan) {
                 ModalBottomSheet(
                     onDismissRequest = { isManualIpSheetOpen = false },
                     sheetState = manualIpSheetState,
@@ -1297,17 +1305,32 @@ private fun mediaProgress(media: MediaPayload?, updatedAtElapsed: Long): Float {
 
 @Composable
 private fun StatusPanel(state: HomeState) {
-    val endpointValue = when (state.role) {
-        BridgeRole.Sink -> state.localIp.ifBlank { "No LAN IP" }
-        BridgeRole.Source -> state.serverIp.ifBlank { "Not set" }
+    val endpointValue = when (state.transportMode) {
+        BridgeTransportMode.Lan -> when (state.role) {
+            BridgeRole.Sink -> state.localIp.ifBlank { "No LAN IP" }
+            BridgeRole.Source -> state.serverIp.ifBlank { "Not set" }
+        }
+        BridgeTransportMode.Ntfy -> state.ntfySettings.serverUrl.ifBlank { "Not set" }
+    }
+    val endpointLabel = when (state.transportMode) {
+        BridgeTransportMode.Lan -> if (state.role == BridgeRole.Sink) "Local IP" else "Receiver IP"
+        BridgeTransportMode.Ntfy -> "ntfy server"
     }
     val rows = buildList {
         add(
             StatusRowData(
                 Icons.Rounded.Wifi,
-                if (state.role == BridgeRole.Sink) "Local IP" else "Receiver IP",
+                endpointLabel,
                 endpointValue,
                 if (endpointValue == "Not set" || endpointValue == "No LAN IP") AxonColor.Red else AxonColor.Cyan
+            )
+        )
+        add(
+            StatusRowData(
+                Icons.Rounded.CheckCircle,
+                "Transport",
+                if (state.transportMode == BridgeTransportMode.Ntfy) "ntfy relay" else "Local Wi-Fi",
+                if (state.transportMode == BridgeTransportMode.Ntfy) AxonColor.Cyan else AxonColor.Amber
             )
         )
         add(
@@ -2087,7 +2110,12 @@ private fun IncomingCallScreen(
 
 @Composable
 private fun SettingsScreen(
+    state: HomeState,
     diagnostics: List<String>,
+    onTransportModeSelected: (BridgeTransportMode) -> Unit,
+    onNtfySettingsChanged: (NtfySettings) -> Unit,
+    onGenerateNtfyPairId: () -> Unit,
+    onTestNtfyConnection: (NtfySettings) -> Unit,
     onBack: () -> Unit,
     onPing: () -> Unit,
     onClearDiagnostics: () -> Unit,
@@ -2098,6 +2126,10 @@ private fun SettingsScreen(
     onRequestBattery: () -> Unit,
     onOpenAppDetails: () -> Unit
 ) {
+    var draftNtfySettings by remember(state.ntfySettings) {
+        mutableStateOf(state.ntfySettings)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -2150,6 +2182,15 @@ private fun SettingsScreen(
                 .padding(top = 18.dp, bottom = 18.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
+            TransportSettingsPanel(
+                transportMode = state.transportMode,
+                ntfySettings = draftNtfySettings,
+                onTransportModeSelected = onTransportModeSelected,
+                onNtfySettingsChanged = { draftNtfySettings = it },
+                onSaveNtfySettings = { onNtfySettingsChanged(draftNtfySettings) },
+                onGeneratePairId = onGenerateNtfyPairId,
+                onTestNtfyConnection = { onTestNtfyConnection(draftNtfySettings) }
+            )
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
@@ -2211,6 +2252,231 @@ private fun SettingsScreen(
             )
         }
     }
+}
+
+@Composable
+private fun TransportSettingsPanel(
+    transportMode: BridgeTransportMode,
+    ntfySettings: NtfySettings,
+    onTransportModeSelected: (BridgeTransportMode) -> Unit,
+    onNtfySettingsChanged: (NtfySettings) -> Unit,
+    onSaveNtfySettings: () -> Unit,
+    onGeneratePairId: () -> Unit,
+    onTestNtfyConnection: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = AxonColor.Panel),
+        border = BorderStroke(1.dp, AxonColor.Border)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                text = "Transport",
+                color = AxonColor.Text,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(AxonColor.PanelRaised)
+                    .border(1.dp, AxonColor.Border, RoundedCornerShape(8.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                RoleTab(
+                    text = "Local Wi-Fi",
+                    selected = transportMode == BridgeTransportMode.Lan,
+                    accent = AxonColor.Amber,
+                    onClick = { onTransportModeSelected(BridgeTransportMode.Lan) },
+                    modifier = Modifier.weight(1f)
+                )
+                RoleTab(
+                    text = "ntfy relay",
+                    selected = transportMode == BridgeTransportMode.Ntfy,
+                    accent = AxonColor.Cyan,
+                    onClick = { onTransportModeSelected(BridgeTransportMode.Ntfy) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            if (transportMode == BridgeTransportMode.Ntfy) {
+                NtfySettingsFields(
+                    ntfySettings = ntfySettings,
+                    onNtfySettingsChanged = onNtfySettingsChanged,
+                    onSave = onSaveNtfySettings,
+                    onGeneratePairId = onGeneratePairId,
+                    onTest = onTestNtfyConnection
+                )
+            } else {
+                Text(
+                    text = "Local Wi-Fi mode uses receiver discovery or manual IP entry from Home.",
+                    color = AxonColor.Muted,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NtfySettingsFields(
+    ntfySettings: NtfySettings,
+    onNtfySettingsChanged: (NtfySettings) -> Unit,
+    onSave: () -> Unit,
+    onGeneratePairId: () -> Unit,
+    onTest: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        SettingsTextField(
+            value = ntfySettings.serverUrl,
+            onValueChange = { onNtfySettingsChanged(ntfySettings.copy(serverUrl = it)) },
+            label = "Server URL",
+            placeholder = "https://axon-ntfy.liara.run"
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SettingsTextField(
+                value = ntfySettings.pairId,
+                onValueChange = { onNtfySettingsChanged(ntfySettings.copy(pairId = it)) },
+                label = "Pair ID",
+                placeholder = "p1-test",
+                modifier = Modifier.weight(1f)
+            )
+            CompactActionButton(
+                text = "Generate",
+                onClick = onGeneratePairId,
+                modifier = Modifier
+                    .width(116.dp)
+                    .padding(top = 8.dp)
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            SettingsTextField(
+                value = ntfySettings.username,
+                onValueChange = { onNtfySettingsChanged(ntfySettings.copy(username = it)) },
+                label = "Username",
+                placeholder = "axon_sender",
+                modifier = Modifier.weight(1f)
+            )
+            SettingsTextField(
+                value = ntfySettings.password,
+                onValueChange = { onNtfySettingsChanged(ntfySettings.copy(password = it)) },
+                label = "Password / token",
+                placeholder = "Required",
+                isSecret = true,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        SettingsTextField(
+            value = ntfySettings.topicPrefix,
+            onValueChange = { onNtfySettingsChanged(ntfySettings.copy(topicPrefix = it)) },
+            label = "Topic prefix",
+            placeholder = "axon"
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(AxonColor.PanelRaised)
+                .border(1.dp, AxonColor.Border, RoundedCornerShape(8.dp))
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "Topics",
+                color = AxonColor.Muted,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+            Text(
+                text = ntfySettings.senderToReceiverTopic.ifBlank { "Pair ID required" },
+                color = AxonColor.Cyan,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = ntfySettings.receiverToSenderTopic.ifBlank { "Pair ID required" },
+                color = AxonColor.Amber,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CompactActionButton(
+                text = "Test",
+                onClick = onTest,
+                modifier = Modifier.weight(1f)
+            )
+            Button(
+                onClick = onSave,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AxonColor.Cyan,
+                    contentColor = Color(0xFF031516)
+                )
+            ) {
+                Text("Save", fontWeight = FontWeight.Bold, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    isSecret: Boolean = false
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.fillMaxWidth(),
+        singleLine = true,
+        label = { Text(label) },
+        placeholder = { Text(placeholder) },
+        visualTransformation = if (isSecret) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+        shape = RoundedCornerShape(8.dp),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = AxonColor.PanelRaised,
+            unfocusedContainerColor = AxonColor.PanelRaised,
+            focusedTextColor = AxonColor.Text,
+            unfocusedTextColor = AxonColor.Text,
+            focusedLabelColor = AxonColor.Cyan,
+            unfocusedLabelColor = AxonColor.Muted,
+            focusedIndicatorColor = AxonColor.Cyan,
+            unfocusedIndicatorColor = AxonColor.Border,
+            cursorColor = AxonColor.Cyan
+        )
+    )
 }
 
 @Composable

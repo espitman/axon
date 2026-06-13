@@ -14,6 +14,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.content.pm.PackageManager
+import android.util.Base64
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import com.axon.bridge.data.AxonSettings
@@ -28,22 +29,28 @@ import com.axon.bridge.data.ReceiverDiscoveryScanner
 import com.axon.bridge.data.SmsArchiveStore
 import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
+import com.axon.bridge.domain.BridgeTransportMode
 import com.axon.bridge.domain.CallCommandAction
 import com.axon.bridge.domain.CallCommandPayload
 import com.axon.bridge.domain.DiscoveredReceiver
 import com.axon.bridge.domain.HomeState
 import com.axon.bridge.domain.MediaCommandAction
 import com.axon.bridge.domain.MediaCommandPayload
+import com.axon.bridge.domain.NtfySettings
 import com.axon.bridge.domain.PermissionStatus
 import com.axon.bridge.domain.SmsArchiveMessage
+import com.axon.bridge.domain.toNtfyTopicSegment
 import com.axon.bridge.service.BridgeService
 import com.axon.bridge.service.AxonNotificationListenerService
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.net.HttpURLConnection
+import java.net.URL
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val appContext = application.applicationContext
@@ -108,6 +115,64 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         refresh()
+    }
+
+    fun selectTransportMode(mode: BridgeTransportMode) {
+        settings.transportMode = mode
+        if (BridgeService.isRunning.value) {
+            appContext.stopService(Intent(appContext, BridgeService::class.java))
+            BridgeService.publishState(
+                BridgeConnectionState.Disconnected,
+                false,
+                "Transport mode changed. Start bridge again."
+            )
+        }
+        DiagnosticsLog.add("Transport mode set to ${mode.name}")
+        refresh()
+    }
+
+    fun updateNtfySettings(ntfySettings: NtfySettings) {
+        settings.ntfySettings = ntfySettings
+        if (BridgeService.isRunning.value) {
+            appContext.stopService(Intent(appContext, BridgeService::class.java))
+            BridgeService.publishState(
+                BridgeConnectionState.Disconnected,
+                false,
+                "ntfy settings changed. Start bridge again."
+            )
+        }
+        DiagnosticsLog.add("ntfy settings saved")
+        refresh()
+    }
+
+    fun generateNtfyPairId() {
+        settings.ntfyPairId = AxonSettings.generatePairId()
+        DiagnosticsLog.add("Generated ntfy pair ID")
+        refresh()
+    }
+
+    fun testNtfyConnection(ntfySettings: NtfySettings = settings.ntfySettings) {
+        val validationError = validateNtfySettings(ntfySettings)
+        if (validationError != null) {
+            DiagnosticsLog.add("ntfy test skipped: $validationError")
+            refresh()
+            return
+        }
+
+        settings.ntfySettings = ntfySettings
+        DiagnosticsLog.add("Testing ntfy connection")
+        refresh()
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                publishNtfyTestMessage(ntfySettings)
+            }
+            result.onSuccess {
+                DiagnosticsLog.add("ntfy connection test succeeded")
+            }.onFailure { error ->
+                DiagnosticsLog.add("ntfy connection test failed: ${error.message ?: error::class.simpleName}")
+            }
+            refresh()
+        }
     }
 
     fun resetServerIp() {
@@ -284,6 +349,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun scanReceivers() {
+        if (settings.transportMode != BridgeTransportMode.Lan) {
+            DiagnosticsLog.add("Network scan is only available in LAN mode")
+            refresh()
+            return
+        }
         if (isScanningReceivers) return
         scanJob?.cancel()
         isScanningReceivers = true
@@ -319,6 +389,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             role = role,
             connectionState = BridgeService.connectionState.value,
             transportMode = settings.transportMode,
+            ntfySettings = settings.ntfySettings,
             serverIp = settings.serverIp,
             localIp = localIp,
             deviceInfo = deviceInfoProvider.currentDevice(),
@@ -380,6 +451,49 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         return when (this) {
             BridgeRole.Source -> "Sender"
             BridgeRole.Sink -> "Receiver"
+        }
+    }
+
+    private fun validateNtfySettings(ntfySettings: NtfySettings): String? {
+        val serverUrl = ntfySettings.serverUrl.trim()
+        if (!serverUrl.startsWith("https://") && !serverUrl.startsWith("http://")) {
+            return "Server URL must start with http:// or https://"
+        }
+        if (ntfySettings.pairId.toNtfyTopicSegment().isBlank()) {
+            return "Pair ID is required"
+        }
+        if (ntfySettings.username.isBlank()) {
+            return "Username is required"
+        }
+        if (ntfySettings.password.isBlank()) {
+            return "Password or token is required"
+        }
+        return null
+    }
+
+    private fun publishNtfyTestMessage(ntfySettings: NtfySettings) {
+        val baseUrl = ntfySettings.serverUrl.trim().trimEnd('/')
+        val topic = when (settings.role) {
+            BridgeRole.Source -> ntfySettings.senderToReceiverTopic
+            BridgeRole.Sink -> ntfySettings.receiverToSenderTopic
+        }
+        val connection = (URL("$baseUrl/$topic").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 10_000
+            readTimeout = 10_000
+            doOutput = true
+            val credential = "${ntfySettings.username}:${ntfySettings.password}"
+            val encodedCredential = Base64.encodeToString(credential.toByteArray(), Base64.NO_WRAP)
+            setRequestProperty("Authorization", "Basic $encodedCredential")
+            setRequestProperty("Content-Type", "text/plain; charset=utf-8")
+        }
+        connection.outputStream.use { output ->
+            output.write("axon ntfy settings test".toByteArray())
+        }
+        val responseCode = connection.responseCode
+        connection.disconnect()
+        if (responseCode !in 200..299) {
+            error("HTTP $responseCode")
         }
     }
 

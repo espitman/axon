@@ -194,12 +194,15 @@ class BridgeService : Service() {
             BridgeRole.valueOf(intent?.getStringExtra(EXTRA_ROLE).orEmpty())
         }.getOrDefault(BridgeRole.Sink)
         val serverIp = intent?.getStringExtra(EXTRA_SERVER_IP).orEmpty().trim()
+        val transportMode = settings.transportMode
         currentRole = role
-        mutableActiveTargetIp.value = serverIp
+        mutableActiveTargetIp.value = if (transportMode == BridgeTransportMode.Lan) serverIp else settings.ntfySettings.serverUrl
+        transport.stop()
+        transport = createTransport(transportMode)
 
         updateState(BridgeConnectionState.Connecting, null)
         acquireWakeLock()
-        startForeground(NOTIFICATION_ID, buildNotification(role, serverIp))
+        startForeground(NOTIFICATION_ID, buildNotification(role, serverIp, transportMode))
         mediaSessionTracker.stop()
         shadowMediaSession.stop()
 
@@ -211,12 +214,18 @@ class BridgeService : Service() {
                 transport.startServer(host = "0.0.0.0")
             }
             BridgeRole.Source -> {
-                registerNetworkCallback()
                 mediaSessionTracker.start()
-                if (serverIp.isBlank()) {
-                    startAutoDiscovery("Receiver IP missing")
+                if (transportMode == BridgeTransportMode.Ntfy) {
+                    stopAutoDiscovery()
+                    unregisterNetworkCallback()
+                    transport.startClient(serverIp = "")
                 } else {
-                    transport.startClient(serverIp)
+                    registerNetworkCallback()
+                    if (serverIp.isBlank()) {
+                        startAutoDiscovery("Receiver IP missing")
+                    } else {
+                        transport.startClient(serverIp)
+                    }
                 }
             }
         }
@@ -301,7 +310,7 @@ class BridgeService : Service() {
                     settings.serverIp = receiver.ip
                     mutableActiveTargetIp.value = receiver.ip
                     DiagnosticsLog.add("Auto discovery found ${receiver.deviceName}: ${receiver.ip}")
-                    startForeground(NOTIFICATION_ID, buildNotification(BridgeRole.Source, receiver.ip))
+                    startForeground(NOTIFICATION_ID, buildNotification(BridgeRole.Source, receiver.ip, BridgeTransportMode.Lan))
                     transport.startClient(receiver.ip, receiver.port)
                     sendStateChangedBroadcast()
                     return@launch
@@ -325,10 +334,24 @@ class BridgeService : Service() {
         autoDiscoveryJob = null
     }
 
-    private fun buildNotification(role: BridgeRole, serverIp: String): Notification {
+    private fun buildNotification(
+        role: BridgeRole,
+        serverIp: String,
+        transportMode: BridgeTransportMode
+    ): Notification {
         val detail = when (role) {
-            BridgeRole.Sink -> "Receiver mode active on this device"
-            BridgeRole.Source -> if (serverIp.isBlank()) "Sender mode waiting for receiver IP" else "Sender mode targeting $serverIp"
+            BridgeRole.Sink -> when (transportMode) {
+                BridgeTransportMode.Lan -> "Receiver mode active on this device"
+                BridgeTransportMode.Ntfy -> "Receiver mode using ntfy relay"
+            }
+            BridgeRole.Source -> when (transportMode) {
+                BridgeTransportMode.Lan -> if (serverIp.isBlank()) {
+                    "Sender mode waiting for receiver IP"
+                } else {
+                    "Sender mode targeting $serverIp"
+                }
+                BridgeTransportMode.Ntfy -> "Sender mode using ntfy relay"
+            }
         }
         val stopIntent = PendingIntent.getService(
             this,

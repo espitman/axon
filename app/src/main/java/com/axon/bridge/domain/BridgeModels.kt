@@ -35,6 +35,7 @@ data class DeviceInfo(
 data class HomeState(
     val role: BridgeRole = BridgeRole.Sink,
     val transportMode: BridgeTransportMode = BridgeTransportMode.Lan,
+    val ntfySettings: NtfySettings = NtfySettings(),
     val connectionState: BridgeConnectionState = BridgeConnectionState.Disconnected,
     val serverIp: String = "",
     val localIp: String = "",
@@ -54,6 +55,44 @@ data class HomeState(
     val discoveredReceivers: List<DiscoveredReceiver> = emptyList(),
     val errorMessage: String? = null
 )
+
+data class NtfySettings(
+    val serverUrl: String = "",
+    val pairId: String = "",
+    val username: String = "",
+    val password: String = "",
+    val topicPrefix: String = "axon"
+) {
+    val senderToReceiverTopic: String
+        get() = topicName("to-receiver")
+
+    val receiverToSenderTopic: String
+        get() = topicName("to-sender")
+
+    private fun topicName(suffix: String): String {
+        val normalizedPrefix = topicPrefix.toNtfyTopicSegment().ifBlank { "axon" }
+        val normalizedPairId = pairId.toNtfyTopicSegment()
+        return listOf(normalizedPrefix, normalizedPairId, suffix)
+            .filter { it.isNotBlank() }
+            .joinToString("-")
+    }
+}
+
+fun String.toNtfyTopicSegment(): String {
+    return trim()
+        .lowercase()
+        .map { character ->
+            when {
+                character.isLetterOrDigit() -> character
+                character == '-' || character == '_' -> character
+                else -> '-'
+            }
+        }
+        .joinToString("")
+        .replace(Regex("-+"), "-")
+        .trim('-', '_')
+        .take(48)
+}
 
 @kotlinx.serialization.Serializable
 data class CallLogEntry(

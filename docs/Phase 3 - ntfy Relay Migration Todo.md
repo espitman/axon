@@ -77,25 +77,31 @@ Verification:
 
 ## Milestone 2: ntfy Settings And Pair Identity
 
-- [ ] Add persistent ntfy settings:
-  - [ ] server URL
-  - [ ] pair ID
-  - [ ] auth token
-  - [ ] topic prefix, defaulting to `axon`
-- [ ] Add Settings UI for ntfy mode:
-  - [ ] transport mode selector
-  - [ ] server URL field
-  - [ ] pair ID field
-  - [ ] token field
-  - [ ] save/apply action
-  - [ ] connection test action
-- [ ] Generate a pair ID if none exists.
-- [ ] Validate server URL before starting bridge.
-- [ ] Hide LAN-only manual IP and scan controls when ntfy mode is selected.
-- [ ] Keep LAN controls visible when LAN mode is selected.
+- [x] Add persistent ntfy settings:
+  - [x] server URL
+  - [x] pair ID
+  - [x] username
+  - [x] password/token credential
+  - [x] topic prefix, defaulting to `axon`
+- [x] Add Settings UI for ntfy mode:
+  - [x] transport mode selector
+  - [x] server URL field
+  - [x] pair ID field
+  - [x] username field
+  - [x] password/token field
+  - [x] topic prefix field
+  - [x] generated topic preview
+  - [x] save/apply action
+  - [x] connection test action
+- [x] Generate a pair ID if none exists.
+- [x] Validate server URL before ntfy connection test.
+- [x] Hide LAN-only manual IP and scan controls when ntfy mode is selected.
+- [x] Keep LAN controls visible when LAN mode is selected.
+- [x] Make the bridge foreground service mode-aware so ntfy mode does not require Receiver IP or LAN discovery.
 
 Verification:
 
+- [x] Debug build succeeds after ntfy settings UI and persistence.
 - [ ] App restart preserves ntfy settings.
 - [ ] Invalid ntfy URL shows a recoverable error.
 - [ ] Switching back to LAN restores the old LAN flow.

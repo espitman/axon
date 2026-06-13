@@ -318,6 +318,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         return HomeState(
             role = role,
             connectionState = BridgeService.connectionState.value,
+            transportMode = settings.transportMode,
             serverIp = settings.serverIp,
             localIp = localIp,
             deviceInfo = deviceInfoProvider.currentDevice(),

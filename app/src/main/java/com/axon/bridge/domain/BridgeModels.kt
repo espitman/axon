@@ -15,6 +15,11 @@ enum class BridgeConnectionState {
     Error
 }
 
+enum class BridgeTransportMode {
+    Lan,
+    Ntfy
+}
+
 data class PermissionStatus(
     val label: String,
     val value: String,
@@ -29,6 +34,7 @@ data class DeviceInfo(
 
 data class HomeState(
     val role: BridgeRole = BridgeRole.Sink,
+    val transportMode: BridgeTransportMode = BridgeTransportMode.Lan,
     val connectionState: BridgeConnectionState = BridgeConnectionState.Disconnected,
     val serverIp: String = "",
     val localIp: String = "",

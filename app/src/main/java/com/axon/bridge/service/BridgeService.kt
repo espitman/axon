@@ -26,9 +26,11 @@ import com.axon.bridge.data.CallAlertStore
 import com.axon.bridge.data.CallBridgeBus
 import com.axon.bridge.data.DeviceInfoProvider
 import com.axon.bridge.data.DiagnosticsLog
+import com.axon.bridge.data.LanBridgeTransport
 import com.axon.bridge.data.MediaBridgeBus
 import com.axon.bridge.data.MediaSessionTracker
 import com.axon.bridge.data.NetworkInfoProvider
+import com.axon.bridge.data.NtfyBridgeTransport
 import com.axon.bridge.data.ReceiverDiscoveryScanner
 import com.axon.bridge.data.ShadowMediaSession
 import com.axon.bridge.data.SmsArchiveStore
@@ -42,6 +44,7 @@ import com.axon.bridge.domain.NotificationPayload
 import com.axon.bridge.domain.NotificationCategory
 import com.axon.bridge.domain.BridgeConnectionState
 import com.axon.bridge.domain.BridgeRole
+import com.axon.bridge.domain.BridgeTransportMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -112,7 +115,18 @@ class BridgeService : Service() {
             context = this,
             onCommand = MediaBridgeBus::publishCommand
         )
-        transport = BridgeTransport(
+        transport = createTransport(settings.transportMode)
+    }
+
+    private fun createTransport(mode: BridgeTransportMode): BridgeTransport {
+        return when (mode) {
+            BridgeTransportMode.Lan -> createLanTransport()
+            BridgeTransportMode.Ntfy -> NtfyBridgeTransport(onStateChanged = ::updateState)
+        }
+    }
+
+    private fun createLanTransport(): BridgeTransport {
+        return LanBridgeTransport(
             scope = serviceScope,
             deviceInfoProvider = DeviceInfoProvider(),
             onStateChanged = ::updateState,

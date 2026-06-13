@@ -2,6 +2,7 @@ package com.axon.bridge.data
 
 import android.content.Context
 import com.axon.bridge.domain.BridgeRole
+import com.axon.bridge.domain.BridgeTransportMode
 
 class AxonSettings(context: Context) {
     private val preferences = context.getSharedPreferences("axon_settings", Context.MODE_PRIVATE)
@@ -20,8 +21,20 @@ class AxonSettings(context: Context) {
             preferences.edit().putString(KEY_SERVER_IP, value.trim()).apply()
         }
 
+    var transportMode: BridgeTransportMode
+        get() = runCatching {
+            BridgeTransportMode.valueOf(
+                preferences.getString(KEY_TRANSPORT_MODE, BridgeTransportMode.Lan.name)
+                    ?: BridgeTransportMode.Lan.name
+            )
+        }.getOrDefault(BridgeTransportMode.Lan)
+        set(value) {
+            preferences.edit().putString(KEY_TRANSPORT_MODE, value.name).apply()
+        }
+
     companion object {
         private const val KEY_ROLE = "role"
         private const val KEY_SERVER_IP = "server_ip"
+        private const val KEY_TRANSPORT_MODE = "transport_mode"
     }
 }

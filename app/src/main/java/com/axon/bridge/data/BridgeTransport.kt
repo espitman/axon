@@ -40,7 +40,19 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.net.Proxy
 
-class BridgeTransport(
+interface BridgeTransport {
+    fun startServer(host: String = "0.0.0.0", port: Int = BridgeTransport.DEFAULT_PORT)
+    fun startClient(serverIp: String, port: Int = BridgeTransport.DEFAULT_PORT)
+    fun stop()
+
+    companion object {
+        const val DEFAULT_PORT = 8080
+        const val BRIDGE_PATH = "/bridge"
+        const val DISCOVERY_PATH = "/discovery"
+    }
+}
+
+class LanBridgeTransport(
     private val scope: CoroutineScope,
     private val deviceInfoProvider: DeviceInfoProvider,
     private val onStateChanged: (BridgeConnectionState, String?) -> Unit,
@@ -51,7 +63,7 @@ class BridgeTransport(
     private val onMediaCommandReceived: (MediaCommandPayload) -> Unit = {},
     private val onMediaCleared: () -> Unit = {},
     private val onCallCommandReceived: (CallCommandPayload) -> Unit = {}
-) {
+) : BridgeTransport {
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -60,7 +72,7 @@ class BridgeTransport(
     private var client: HttpClient? = null
     private var clientJob: Job? = null
 
-    fun startServer(host: String = "0.0.0.0", port: Int = DEFAULT_PORT) {
+    override fun startServer(host: String, port: Int) {
         stop()
         DiagnosticsLog.add("Receiver server starting on $host:$port")
         onStateChanged(BridgeConnectionState.Connecting, null)
@@ -111,7 +123,7 @@ class BridgeTransport(
         onStateChanged(BridgeConnectionState.Connecting, "Waiting for sender device")
     }
 
-    fun startClient(serverIp: String, port: Int = DEFAULT_PORT) {
+    override fun startClient(serverIp: String, port: Int) {
         stop()
         val normalizedIp = serverIp.trim()
         if (normalizedIp.isBlank()) {
@@ -187,7 +199,7 @@ class BridgeTransport(
         }
     }
 
-    fun stop() {
+    override fun stop() {
         clientJob?.cancel()
         clientJob = null
         client?.close()
@@ -336,8 +348,8 @@ class BridgeTransport(
     }
 
     companion object {
-        const val DEFAULT_PORT = 8080
-        const val BRIDGE_PATH = "/bridge"
-        const val DISCOVERY_PATH = "/discovery"
+        const val DEFAULT_PORT = BridgeTransport.DEFAULT_PORT
+        const val BRIDGE_PATH = BridgeTransport.BRIDGE_PATH
+        const val DISCOVERY_PATH = BridgeTransport.DISCOVERY_PATH
     }
 }

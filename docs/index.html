@@ -196,7 +196,7 @@ Inbox, call log, media session, watch bridge</code></pre>
             <li>Full-screen call alerts depend on Android and OEM settings.</li>
             <li>Reject call is experimental and may return false on some devices.</li>
             <li>Watch behavior depends on the phone companion app and its allowlist.</li>
-            <li>Large media artwork may be omitted over ntfy to keep payloads reliable.</li>
+            <li>Large media artwork is compacted over ntfy and omitted only if it still exceeds the safe payload limit.</li>
             <li>Local archive data stays on the Receiver; it is not a system SMS database.</li>
           </ul>
         </div>
@@ -239,8 +239,8 @@ Inbox, call log, media session, watch bridge</code></pre>
           <article class="card">
             <h3>Payload too large</h3>
             <p>
-              ntfy mode keeps messages small. Large artwork may be omitted, while media metadata and
-              controls should continue working.
+              ntfy mode keeps messages small. Large artwork is compacted first and omitted only if it
+              still exceeds the safe payload limit, while media metadata and controls should continue working.
             </p>
           </article>
           <article class="card">

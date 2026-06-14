@@ -411,6 +411,21 @@ class NtfyBridgeTransport(
         ) {
             return messageWithArtwork
         }
+        MediaArtworkPolicy.compactArtworkCandidates(payload).forEach { compactPayload ->
+            val compactMessage = BridgeMessage(
+                type = BridgeMessageType.MediaUpdate,
+                media = compactPayload
+            )
+            val compactBytes = MediaArtworkPolicy.utf8Size(
+                relayEnvelopeCodec.encode(compactMessage, BridgeRole.Sink)
+            )
+            if (compactBytes <= MediaArtworkPolicy.NTFY_INLINE_PAYLOAD_LIMIT_BYTES) {
+                DiagnosticsLog.add(
+                    "ntfy media artwork compacted: ${encodedWithArtworkBytes}B -> ${compactBytes}B"
+                )
+                return compactMessage
+            }
+        }
         val messageWithoutArtwork = MediaArtworkPolicy.withoutArtwork(messageWithArtwork)
         val encodedWithoutArtworkBytes = MediaArtworkPolicy.utf8Size(
             relayEnvelopeCodec.encode(messageWithoutArtwork, BridgeRole.Sink)

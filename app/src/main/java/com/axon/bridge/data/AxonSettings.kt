@@ -26,10 +26,10 @@ class AxonSettings(context: Context) {
     var transportMode: BridgeTransportMode
         get() = runCatching {
             BridgeTransportMode.valueOf(
-                preferences.getString(KEY_TRANSPORT_MODE, BridgeTransportMode.Lan.name)
-                    ?: BridgeTransportMode.Lan.name
+                preferences.getString(KEY_TRANSPORT_MODE, BridgeTransportMode.Ntfy.name)
+                    ?: BridgeTransportMode.Ntfy.name
             )
-        }.getOrDefault(BridgeTransportMode.Lan)
+        }.getOrDefault(BridgeTransportMode.Ntfy)
         set(value) {
             preferences.edit().putString(KEY_TRANSPORT_MODE, value.name).apply()
         }

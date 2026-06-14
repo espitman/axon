@@ -62,7 +62,7 @@ Sender tracks active media sessions and sends metadata to Receiver:
 
 - Track title, artist, album, playback state, and supported actions.
 - Artwork over LAN.
-- Artwork over ntfy only when the encrypted relay payload is small enough; large artwork is omitted to keep relay messages reliable.
+- Artwork over ntfy is compacted into the encrypted relay payload when possible; it is omitted only if it still exceeds the safe payload limit.
 
 Receiver creates a shadow media session so media controls can flow back to Sender:
 
@@ -321,8 +321,8 @@ adb install -r /Users/espitman/Desktop/axon-release.apk
 ### Payload Too Large
 
 - ntfy mode keeps relay messages small.
-- Large media artwork may be omitted.
-- Metadata and controls should continue working even when artwork is not sent.
+- Large media artwork is compacted first and may be omitted only if it still exceeds the safe payload limit.
+- Metadata and controls should continue working even when artwork is heavily compressed or not sent.
 
 ### Commands Do Not Return To Sender
 

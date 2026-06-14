@@ -70,6 +70,7 @@ dependencies {
     implementation("io.ktor:ktor-server-websockets:2.3.12")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling-android:1.7.6")
     debugImplementation("androidx.compose.ui:ui-test-manifest:1.7.6")

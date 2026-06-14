@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
@@ -12,9 +13,11 @@ import android.os.SystemClock
 import android.util.Base64
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -147,6 +150,13 @@ import com.axon.bridge.data.CallAlertStore
 import com.axon.bridge.data.CallBridgeBus
 import com.axon.bridge.data.DiagnosticsLog
 import com.axon.bridge.service.MirroredNotificationManager
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.text.DateFormat
 import java.util.Date
 
@@ -1326,6 +1336,77 @@ private fun String.decodeArtworkBitmap() = runCatching {
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
 }.getOrNull()
 
+@Serializable
+private data class NtfyPairingPayload(
+    val type: String = PAIRING_PAYLOAD_TYPE,
+    val version: Int = 1,
+    val serverUrl: String,
+    val pairId: String,
+    val pairSecret: String,
+    val topicPrefix: String
+)
+
+private fun ntfyPairingPayloadText(settings: NtfySettings): String {
+    return Json.encodeToString(
+        NtfyPairingPayload(
+            serverUrl = settings.serverUrl.trim(),
+            pairId = settings.pairId.trim(),
+            pairSecret = settings.pairSecret.trim(),
+            topicPrefix = settings.topicPrefix.trim().ifBlank { "axon" }
+        )
+    )
+}
+
+private fun parseNtfyPairingPayload(text: String): NtfySettings? {
+    return runCatching {
+        val payload = Json.decodeFromString<NtfyPairingPayload>(text)
+        if (payload.type != PAIRING_PAYLOAD_TYPE || payload.version != 1) return null
+        if (payload.serverUrl.isBlank() || payload.pairId.isBlank() || payload.pairSecret.isBlank()) return null
+        NtfySettings(
+            serverUrl = payload.serverUrl.trim(),
+            pairId = payload.pairId.trim(),
+            pairSecret = payload.pairSecret.trim(),
+            topicPrefix = payload.topicPrefix.trim().ifBlank { "axon" }
+        )
+    }.getOrNull()
+}
+
+private fun validatePairingQrSettings(settings: NtfySettings): String? {
+    return when {
+        settings.serverUrl.trim().isBlank() -> "Server URL is required before showing pairing QR"
+        settings.pairId.trim().isBlank() -> "Pair ID is required before showing pairing QR"
+        settings.pairSecret.trim().isBlank() -> "Generate a pair secret before showing pairing QR"
+        else -> null
+    }
+}
+
+private fun generatePairingQrBitmap(text: String): Bitmap {
+    val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, PAIRING_QR_SIZE, PAIRING_QR_SIZE)
+    return Bitmap.createBitmap(PAIRING_QR_SIZE, PAIRING_QR_SIZE, Bitmap.Config.ARGB_8888).apply {
+        for (x in 0 until PAIRING_QR_SIZE) {
+            for (y in 0 until PAIRING_QR_SIZE) {
+                setPixel(
+                    x,
+                    y,
+                    if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+                )
+            }
+        }
+    }
+}
+
+private fun ntfyPairingScanOptions(): ScanOptions {
+    return ScanOptions().apply {
+        setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+        setPrompt("Scan Axon pairing QR")
+        setBeepEnabled(false)
+        setOrientationLocked(true)
+    }
+}
+
+private const val PAIRING_PAYLOAD_TYPE = "com.axon.bridge.ntfy-pairing"
+private const val PAIRING_QR_SIZE = 720
+
 @Composable
 private fun StatusPanel(state: HomeState) {
     val endpointValue = when (state.transportMode) {
@@ -2152,8 +2233,54 @@ private fun SettingsScreen(
     onRequestBattery: () -> Unit,
     onOpenAppDetails: () -> Unit
 ) {
+    val context = LocalContext.current
     var draftNtfySettings by remember(state.ntfySettings) {
         mutableStateOf(state.ntfySettings)
+    }
+    var pairingQrSettings by remember { mutableStateOf<NtfySettings?>(null) }
+    var pairingError by remember { mutableStateOf<String?>(null) }
+    val qrScanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val contents = result.contents.orEmpty()
+        if (contents.isBlank()) return@rememberLauncherForActivityResult
+        val importedSettings = parseNtfyPairingPayload(contents)
+        if (importedSettings == null) {
+            pairingError = "Pairing QR is invalid"
+        } else {
+            draftNtfySettings = draftNtfySettings.copy(
+                serverUrl = importedSettings.serverUrl,
+                pairId = importedSettings.pairId,
+                pairSecret = importedSettings.pairSecret,
+                topicPrefix = importedSettings.topicPrefix
+            )
+            pairingError = "Pairing QR imported. Save settings."
+        }
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            qrScanLauncher.launch(ntfyPairingScanOptions())
+        } else {
+            pairingError = "Camera permission is required to scan pairing QR"
+        }
+    }
+    fun scanPairingQr() {
+        if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            qrScanLauncher.launch(ntfyPairingScanOptions())
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+    fun showPairingQr() {
+        val error = validatePairingQrSettings(draftNtfySettings)
+        if (error != null) {
+            pairingError = error
+            return
+        }
+        pairingQrSettings = draftNtfySettings
     }
 
     Column(
@@ -2217,7 +2344,9 @@ private fun SettingsScreen(
                 onGeneratePairId = onGenerateNtfyPairId,
                 onGeneratePairSecret = onGenerateNtfyPairSecret,
                 onUnpair = onUnpairNtfy,
-                onTestNtfyConnection = { onTestNtfyConnection(draftNtfySettings) }
+                onTestNtfyConnection = { onTestNtfyConnection(draftNtfySettings) },
+                onShowPairingQr = { showPairingQr() },
+                onScanPairingQr = { scanPairingQr() }
             )
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -2284,6 +2413,29 @@ private fun SettingsScreen(
             )
         }
     }
+
+    pairingQrSettings?.let { settings ->
+        NtfyPairingQrDialog(
+            settings = settings,
+            onDismiss = { pairingQrSettings = null }
+        )
+    }
+
+    pairingError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { pairingError = null },
+            confirmButton = {
+                TextButton(onClick = { pairingError = null }) {
+                    Text("OK")
+                }
+            },
+            title = { Text("Pairing") },
+            text = { Text(message) },
+            containerColor = AxonColor.Panel,
+            titleContentColor = AxonColor.Text,
+            textContentColor = AxonColor.Muted
+        )
+    }
 }
 
 @Composable
@@ -2296,7 +2448,9 @@ private fun TransportSettingsPanel(
     onGeneratePairId: () -> Unit,
     onGeneratePairSecret: () -> Unit,
     onUnpair: () -> Unit,
-    onTestNtfyConnection: () -> Unit
+    onTestNtfyConnection: () -> Unit,
+    onShowPairingQr: () -> Unit,
+    onScanPairingQr: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -2348,7 +2502,9 @@ private fun TransportSettingsPanel(
                     onGeneratePairId = onGeneratePairId,
                     onGeneratePairSecret = onGeneratePairSecret,
                     onUnpair = onUnpair,
-                    onTest = onTestNtfyConnection
+                    onTest = onTestNtfyConnection,
+                    onShowPairingQr = onShowPairingQr,
+                    onScanPairingQr = onScanPairingQr
                 )
             } else {
                 Text(
@@ -2370,7 +2526,9 @@ private fun NtfySettingsFields(
     onGeneratePairId: () -> Unit,
     onGeneratePairSecret: () -> Unit,
     onUnpair: () -> Unit,
-    onTest: () -> Unit
+    onTest: () -> Unit,
+    onShowPairingQr: () -> Unit,
+    onScanPairingQr: () -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -2485,6 +2643,21 @@ private fun NtfySettingsFields(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             CompactActionButton(
+                text = "Show QR",
+                onClick = onShowPairingQr,
+                modifier = Modifier.weight(1f)
+            )
+            CompactActionButton(
+                text = "Scan QR",
+                onClick = onScanPairingQr,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CompactActionButton(
                 text = "Test",
                 onClick = onTest,
                 modifier = Modifier.weight(1f)
@@ -2509,6 +2682,60 @@ private fun NtfySettingsFields(
             modifier = Modifier.fillMaxWidth()
         )
     }
+}
+
+@Composable
+private fun NtfyPairingQrDialog(
+    settings: NtfySettings,
+    onDismiss: () -> Unit
+) {
+    val qrBitmap = remember(settings) {
+        generatePairingQrBitmap(ntfyPairingPayloadText(settings))
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done")
+            }
+        },
+        title = {
+            Text("Pairing QR")
+        },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White)
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        bitmap = qrBitmap.asImageBitmap(),
+                        contentDescription = "ntfy pairing QR",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
+                    )
+                }
+                Text(
+                    text = "Scan this on the other phone. It includes server URL, pair ID, pair secret, and topic prefix.",
+                    color = AxonColor.Muted,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        },
+        containerColor = AxonColor.Panel,
+        titleContentColor = AxonColor.Text,
+        textContentColor = AxonColor.Muted
+    )
 }
 
 @Composable

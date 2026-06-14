@@ -354,7 +354,7 @@ Verification:
 - [ ] Validate Receiver watch media controls reach Sender over ntfy.
 - [ ] Validate short offline periods recover without replaying old SMS/call/media events endlessly.
 - [ ] Validate LAN mode still works as a fallback/manual local mode.
-- [ ] Add QR-code pairing so one phone can scan server URL, pair ID, and pair secret from the other phone instead of typing/copying them manually.
+- [x] Add QR-code pairing so one phone can scan server URL, pair ID, and pair secret from the other phone instead of typing/copying them manually.
 - [ ] Add screenshots for:
   - [ ] Home with ntfy selected.
   - [ ] ntfy settings and pair identity.

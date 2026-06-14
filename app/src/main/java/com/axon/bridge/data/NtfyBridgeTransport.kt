@@ -54,6 +54,8 @@ class NtfyBridgeTransport(
     private var activeSubscription: HttpURLConnection? = null
     @Volatile
     private var hasSubscribedOnce = false
+    @Volatile
+    private var hasConfirmedRelayReachable = false
 
     override fun startServer(host: String, port: Int) {
         stop()
@@ -270,7 +272,15 @@ class NtfyBridgeTransport(
         var backoffMs = 2_000L
         while (scope.isActive) {
             try {
-                onStateChanged(BridgeConnectionState.Connecting, "Subscribing to ntfy")
+                if (!hasConfirmedRelayReachable) {
+                    onStateChanged(BridgeConnectionState.Connecting, "Checking ntfy relay")
+                    checkRelayReachable(topic)
+                    hasConfirmedRelayReachable = true
+                    DiagnosticsLog.add("ntfy relay reachable")
+                    onStateChanged(BridgeConnectionState.Connected, "ntfy relay reachable")
+                } else {
+                    onStateChanged(BridgeConnectionState.Connecting, "Subscribing to ntfy")
+                }
                 subscribe(topic)
                 backoffMs = 2_000L
             } catch (cancellation: CancellationException) {
@@ -282,6 +292,25 @@ class NtfyBridgeTransport(
                 delay(backoffMs)
                 backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
             }
+        }
+    }
+
+    private fun checkRelayReachable(topic: String) {
+        val connection = openConnection("$topic/json?poll=1").apply {
+            requestMethod = "GET"
+            readTimeout = 10_000
+        }
+        val responseCode = connection.responseCode
+        runCatching {
+            if (responseCode in 200..299) {
+                connection.inputStream.close()
+            } else {
+                connection.errorStream?.close()
+            }
+        }
+        connection.disconnect()
+        if (responseCode !in 200..299) {
+            throw NtfyHttpException(responseCode)
         }
     }
 

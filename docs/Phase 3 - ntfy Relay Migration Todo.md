@@ -108,15 +108,15 @@ Verification:
 
 ## Milestone 3: ntfy Server Setup
 
-- [ ] Prepare self-hosted ntfy configuration.
-- [ ] Enable HTTPS.
+- [x] Prepare self-hosted ntfy configuration.
+- [x] Enable HTTPS.
 - [ ] Set default access to deny all.
-- [ ] Create a dedicated Axon user or token.
+- [x] Create dedicated Axon users.
 - [ ] Allow publish/subscribe only for Axon topics.
 - [ ] Set a short cache duration for privacy.
-- [ ] Decide whether attachments are disabled for the first version.
-- [ ] Document server environment variables or config file values.
-- [ ] Document backup/restore expectations for ntfy config.
+- [x] Decide whether attachments are disabled for the first version.
+- [x] Document server environment variables or config file values.
+- [x] Document backup/restore expectations for ntfy config.
 
 Recommended policy:
 
@@ -127,54 +127,78 @@ Recommended policy:
 
 Verification:
 
-- [ ] `curl` can publish a test message with the token.
-- [ ] `curl` or browser subscription receives the test message.
+- [x] `curl` can publish a test message with authenticated Axon users.
+- [x] `curl` subscription receives the authenticated test messages.
 - [ ] Unauthorized publish/subscribe attempts fail.
+
+Current blocker:
+
+- Anonymous publish and subscribe currently return HTTP `200`.
+- Wrong-direction authenticated publish also currently returns HTTP `200`.
+- This means the auth database/ACL exists, but the running ntfy server is not enforcing `auth-file` and `auth-default-access=deny-all` yet.
 
 ## Milestone 4: Protocol Envelope For Relay Transport
 
-- [ ] Add an Axon relay envelope around `BridgeMessage`.
-- [ ] Include:
-  - [ ] message ID
-  - [ ] pair ID
-  - [ ] source device ID
-  - [ ] target role
-  - [ ] created timestamp
-  - [ ] message type
-  - [ ] payload version
-  - [ ] bridge payload
-- [ ] Add deduplication by message ID.
-- [ ] Ignore messages from the current local device.
-- [ ] Ignore messages for a different pair ID.
-- [ ] Add version handling so future payload changes do not crash older builds.
-- [ ] Add diagnostics for accepted, ignored, duplicate, and malformed relay messages.
+- [x] Add an Axon relay envelope around `BridgeMessage`.
+- [x] Include:
+  - [x] message ID
+  - [x] pair ID
+  - [x] source device ID
+  - [x] target role
+  - [x] created timestamp
+  - [x] message type
+  - [x] payload version
+  - [x] bridge payload
+- [x] Add persistent local device ID.
+- [x] Add deduplication by message ID.
+- [x] Ignore messages from the current local device.
+- [x] Ignore messages for a different pair ID.
+- [x] Ignore messages for a different target role.
+- [x] Add version handling so future payload changes do not crash older builds.
+- [x] Add diagnostics for accepted, ignored, duplicate, and malformed relay messages.
+- [x] Wire the envelope codec into the ntfy transport skeleton for Milestone 5.
 
 Verification:
 
+- [x] Debug build succeeds after adding the relay envelope codec.
 - [ ] Duplicate ntfy messages do not create duplicate SMS/call/media events.
 - [ ] Wrong pair ID is ignored.
 - [ ] Malformed payload is logged without crashing the service.
 
+Implementation files:
+
+- `app/src/main/java/com/axon/bridge/domain/BridgeProtocol.kt`
+- `app/src/main/java/com/axon/bridge/data/RelayEnvelopeCodec.kt`
+- `app/src/main/java/com/axon/bridge/data/AxonSettings.kt`
+- `app/src/main/java/com/axon/bridge/data/NtfyBridgeTransport.kt`
+
 ## Milestone 5: Sender To Receiver Over ntfy
 
-- [ ] Implement ntfy publish from Sender to Receiver.
-- [ ] Implement ntfy subscribe on Receiver.
-- [ ] Support these message types first:
-  - [ ] `NOTIFICATION_EVENT`
-  - [ ] call state inside `NotificationPayload`
-  - [ ] `MEDIA_UPDATE` without artwork if payload is too large
-  - [ ] `MEDIA_CLEAR`
-- [ ] Add reconnect handling for the subscription stream.
-- [ ] Add retry/backoff for publish failures.
-- [ ] Add local queue for short offline periods.
-- [ ] Add diagnostics for publish success/failure and subscription state.
+- [x] Implement ntfy publish from Sender to Receiver.
+- [x] Implement ntfy subscribe on Receiver.
+- [x] Support these message types first:
+  - [x] `NOTIFICATION_EVENT`
+  - [x] call state inside `NotificationPayload`
+  - [x] `MEDIA_UPDATE` without artwork if payload is too large
+  - [x] `MEDIA_CLEAR`
+- [x] Add reconnect handling for the subscription stream.
+- [x] Add retry/backoff for publish failures.
+- [x] Add local in-memory queue for short offline periods.
+- [x] Add diagnostics for publish success/failure and subscription state.
 
 Verification:
 
+- [x] Debug build succeeds after Sender-to-Receiver ntfy transport implementation.
 - [ ] Sender SMS appears on Receiver when devices are not on the same Wi-Fi.
 - [ ] Receiver call notification/log updates over ntfy.
 - [ ] Receiver media panel updates over ntfy.
 - [ ] Receiver service recovers after network loss.
+
+Implementation files:
+
+- `app/src/main/java/com/axon/bridge/data/NtfyBridgeTransport.kt`
+- `app/src/main/java/com/axon/bridge/service/BridgeService.kt`
+- `app/src/main/java/com/axon/bridge/data/RelayEnvelopeCodec.kt`
 
 ## Milestone 6: Receiver To Sender Commands Over ntfy
 

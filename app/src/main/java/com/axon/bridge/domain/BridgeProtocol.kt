@@ -14,6 +14,24 @@ data class BridgeMessage(
 )
 
 @Serializable
+data class RelayEnvelope(
+    val schema: String = RELAY_SCHEMA,
+    val messageId: String,
+    val pairId: String,
+    val sourceDeviceId: String,
+    val targetRole: BridgeRole,
+    val createdAt: Long,
+    val messageType: BridgeMessageType,
+    val payloadVersion: Int = RELAY_PAYLOAD_VERSION,
+    val bridgePayload: BridgeMessage
+) {
+    companion object {
+        const val RELAY_SCHEMA = "axon.relay.v1"
+        const val RELAY_PAYLOAD_VERSION = 1
+    }
+}
+
+@Serializable
 enum class BridgeMessageType {
     @SerialName("HELLO")
     Hello,

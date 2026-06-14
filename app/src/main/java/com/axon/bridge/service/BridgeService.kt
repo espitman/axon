@@ -115,13 +115,36 @@ class BridgeService : Service() {
             context = this,
             onCommand = MediaBridgeBus::publishCommand
         )
-        transport = createTransport(settings.transportMode)
+        transport = createTransport(settings.transportMode, currentRole)
     }
 
-    private fun createTransport(mode: BridgeTransportMode): BridgeTransport {
+    private fun createTransport(mode: BridgeTransportMode, role: BridgeRole): BridgeTransport {
         return when (mode) {
             BridgeTransportMode.Lan -> createLanTransport()
-            BridgeTransportMode.Ntfy -> NtfyBridgeTransport(onStateChanged = ::updateState)
+            BridgeTransportMode.Ntfy -> NtfyBridgeTransport(
+                scope = serviceScope,
+                ntfySettings = settings.ntfySettings,
+                localDeviceId = settings.deviceId,
+                localRole = role,
+                onStateChanged = ::updateState,
+                onEventTransferred = {
+                    mutableLastEventTimeMillis.value = System.currentTimeMillis()
+                    sendStateChangedBroadcast()
+                },
+                onNotificationReceived = { payload ->
+                    handleNotificationPayload(payload)
+                },
+                onMediaUpdateReceived = { payload ->
+                    publishMedia(payload)
+                    shadowMediaSession.update(payload)
+                    shadowMediaSession.token()?.let { token ->
+                        mediaNotificationManager.show(payload, token)
+                    }
+                },
+                onMediaCleared = {
+                    clearMedia()
+                }
+            )
         }
     }
 
@@ -198,7 +221,7 @@ class BridgeService : Service() {
         currentRole = role
         mutableActiveTargetIp.value = if (transportMode == BridgeTransportMode.Lan) serverIp else settings.ntfySettings.serverUrl
         transport.stop()
-        transport = createTransport(transportMode)
+        transport = createTransport(transportMode, role)
 
         updateState(BridgeConnectionState.Connecting, null)
         acquireWakeLock()

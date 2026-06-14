@@ -70,6 +70,15 @@ class AxonSettings(context: Context) {
             preferences.edit().putString(KEY_NTFY_TOPIC_PREFIX, value.trim()).apply()
         }
 
+    val deviceId: String
+        get() {
+            val savedDeviceId = preferences.getString(KEY_DEVICE_ID, "")?.trim().orEmpty()
+            if (savedDeviceId.isNotBlank()) return savedDeviceId
+            val generatedDeviceId = UUID.randomUUID().toString()
+            preferences.edit().putString(KEY_DEVICE_ID, generatedDeviceId).apply()
+            return generatedDeviceId
+        }
+
     var ntfySettings: NtfySettings
         get() = NtfySettings(
             serverUrl = ntfyServerUrl,
@@ -99,6 +108,7 @@ class AxonSettings(context: Context) {
         private const val KEY_NTFY_USERNAME = "ntfy_username"
         private const val KEY_NTFY_PASSWORD = "ntfy_password"
         private const val KEY_NTFY_TOPIC_PREFIX = "ntfy_topic_prefix"
+        private const val KEY_DEVICE_ID = "device_id"
 
         fun generatePairId(): String {
             return UUID.randomUUID()

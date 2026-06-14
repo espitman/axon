@@ -197,7 +197,54 @@ The following flows were verified manually:
 - `axon_receiver` can publish to `axon-p1-test-to-sender`.
 - `axon_sender` can read from `axon-p1-test-to-sender`.
 
-This means the relay is ready for the first Axon app integration milestone.
+The following security checks currently fail:
+
+- Anonymous publish to `axon-p1-test-to-receiver` returns HTTP `200`.
+- Anonymous subscribe to both Axon topics returns HTTP `200`.
+- `axon_sender` can publish to `axon-p1-test-to-sender`, even though it should be read-only for that topic.
+
+This means the relay message path works, but server-side auth/ACL enforcement is not active in the running ntfy process yet.
+
+Before real app traffic is sent through this server, restart/redeploy ntfy with:
+
+```text
+NTFY_AUTH_FILE=/var/lib/ntfy/user.db
+NTFY_AUTH_DEFAULT_ACCESS=deny-all
+```
+
+Then re-run the unauthorized access checks below.
+
+## Security Verification
+
+Anonymous publish must fail:
+
+```sh
+curl -o /tmp/axon_ntfy_anonymous_publish.json -w '%{http_code}\n' \
+  -d 'anonymous should fail' \
+  https://axon-ntfy.liara.run/axon-p1-test-to-receiver
+```
+
+Wrong-direction publish must fail:
+
+```sh
+curl -o /tmp/axon_ntfy_wrong_direction.json -w '%{http_code}\n' \
+  -u axon_sender:'SENDER_PASSWORD' \
+  -d 'sender should not write command topic' \
+  https://axon-ntfy.liara.run/axon-p1-test-to-sender
+```
+
+Anonymous subscribe must fail:
+
+```sh
+curl -o /tmp/axon_ntfy_anonymous_read.json -w '%{http_code}\n' \
+  'https://axon-ntfy.liara.run/axon-p1-test-to-receiver/json?poll=1'
+```
+
+Expected result:
+
+```text
+401 or 403
+```
 
 ## App Settings For First Integration
 

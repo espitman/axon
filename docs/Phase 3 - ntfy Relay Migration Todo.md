@@ -202,32 +202,40 @@ Implementation files:
 
 ## Milestone 6: Receiver To Sender Commands Over ntfy
 
-- [ ] Publish Receiver commands to `to-sender`.
-- [ ] Subscribe on Sender to `to-sender`.
-- [ ] Support:
-  - [ ] `MEDIA_COMMAND`
-  - [ ] `CALL_COMMAND`
-- [ ] Route media commands into `MediaSessionTracker`.
-- [ ] Route call reject command into the existing Sender call-control path.
-- [ ] Add diagnostics for command publish, receive, ignore, and dispatch.
+- [x] Publish Receiver commands to `to-sender`.
+- [x] Subscribe on Sender to `to-sender`.
+- [x] Support:
+  - [x] `MEDIA_COMMAND`
+  - [x] `CALL_COMMAND`
+- [x] Route media commands into `MediaSessionTracker`.
+- [x] Route call reject command into the existing Sender call-control path.
+- [x] Add diagnostics for command publish, receive, ignore, and dispatch.
 
 Verification:
 
+- [x] Debug build succeeds after Receiver-to-Sender ntfy command implementation.
 - [ ] Receiver phone play/pause controls affect Sender playback over ntfy.
 - [ ] Receiver watch controls affect Sender playback over ntfy.
 - [ ] Receiver call reject attempts to end the Sender call over ntfy.
 - [ ] Commands from wrong pair/device are ignored.
 
+Implementation files:
+
+- `app/src/main/java/com/axon/bridge/data/NtfyBridgeTransport.kt`
+- `app/src/main/java/com/axon/bridge/service/BridgeService.kt`
+- `app/src/main/java/com/axon/bridge/data/RelayEnvelopeCodec.kt`
+
 ## Milestone 7: Media Artwork Strategy
 
-- [ ] Measure real ntfy payload limits with current artwork payloads.
-- [ ] Decide first release behavior:
-  - [ ] omit artwork over ntfy, or
-  - [ ] aggressively resize/compress artwork, or
+- [x] Measure relay envelope payload size before publishing media over ntfy.
+- [x] Decide first release behavior:
+  - [x] inline artwork only when the full relay envelope is below `3500` UTF-8 bytes.
+  - [x] omit artwork over ntfy when the payload is larger.
   - [ ] use ntfy attachments if acceptable for privacy and server config.
-- [ ] Keep artwork over LAN unchanged unless a shared protocol change requires it.
-- [ ] Add payload-size diagnostics for media updates.
-- [ ] Add a fallback placeholder when artwork is unavailable.
+- [x] Keep artwork over LAN unchanged.
+- [x] Add payload-size diagnostics for media updates.
+- [x] Add a fallback placeholder when artwork is unavailable.
+- [x] Render artwork in the Receiver media panel when it is available.
 
 Recommendation:
 
@@ -236,9 +244,16 @@ Recommendation:
 
 Verification:
 
+- [x] Debug build succeeds after artwork policy and UI fallback changes.
 - [ ] Large album art does not break media sync.
 - [ ] Media metadata continues to update when artwork is omitted.
 - [ ] Receiver UI handles missing artwork cleanly.
+
+Implementation files:
+
+- `app/src/main/java/com/axon/bridge/data/MediaArtworkPolicy.kt`
+- `app/src/main/java/com/axon/bridge/data/NtfyBridgeTransport.kt`
+- `app/src/main/java/com/axon/bridge/MainActivity.kt`
 
 ## Milestone 8: Reliability And Offline Behavior
 

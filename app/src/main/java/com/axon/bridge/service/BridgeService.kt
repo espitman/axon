@@ -141,8 +141,14 @@ class BridgeService : Service() {
                         mediaNotificationManager.show(payload, token)
                     }
                 },
+                onMediaCommandReceived = { command ->
+                    mediaSessionTracker.dispatchCommand(command)
+                },
                 onMediaCleared = {
                     clearMedia()
+                },
+                onCallCommandReceived = { command ->
+                    handleCallCommand(command)
                 }
             )
         }

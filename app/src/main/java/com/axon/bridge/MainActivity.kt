@@ -5,9 +5,11 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.util.Base64
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -32,6 +34,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -108,6 +111,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -891,6 +895,9 @@ private fun MediaPanel(
     canControl: Boolean,
     onCommand: (MediaCommandAction) -> Unit
 ) {
+    val artworkBitmap = remember(media?.artworkBase64) {
+        media?.artworkBase64?.decodeArtworkBitmap()
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -912,12 +919,20 @@ private fun MediaPanel(
                         .background(AxonColor.Cyan.copy(alpha = 0.13f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.MusicNote,
-                        contentDescription = null,
-                        tint = AxonColor.Cyan,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    if (artworkBitmap != null) {
+                        Image(
+                            bitmap = artworkBitmap.asImageBitmap(),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.MusicNote,
+                            contentDescription = null,
+                            tint = AxonColor.Cyan,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -1302,6 +1317,11 @@ private fun mediaProgress(media: MediaPayload?, updatedAtElapsed: Long): Float {
     return ((media.position + elapsed).coerceIn(0L, media.duration).toFloat() / media.duration.toFloat())
         .coerceIn(0f, 1f)
 }
+
+private fun String.decodeArtworkBitmap() = runCatching {
+    val bytes = Base64.decode(this, Base64.NO_WRAP)
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+}.getOrNull()
 
 @Composable
 private fun StatusPanel(state: HomeState) {

@@ -32,7 +32,9 @@ class NtfyBridgeTransport(
     private val onEventTransferred: () -> Unit,
     private val onNotificationReceived: (com.axon.bridge.domain.NotificationPayload) -> Unit,
     private val onMediaUpdateReceived: (MediaPayload) -> Unit,
-    private val onMediaCleared: () -> Unit
+    private val onMediaCommandReceived: (com.axon.bridge.domain.MediaCommandPayload) -> Unit,
+    private val onMediaCleared: () -> Unit,
+    private val onCallCommandReceived: (com.axon.bridge.domain.CallCommandPayload) -> Unit
 ) : BridgeTransport {
     private val relayEnvelopeCodec = RelayEnvelopeCodec(
         pairId = ntfySettings.pairId,
@@ -43,7 +45,7 @@ class NtfyBridgeTransport(
         ignoreUnknownKeys = true
         encodeDefaults = true
     }
-    private val pendingMessages = ArrayDeque<BridgeMessage>()
+    private val pendingMessages = ArrayDeque<OutboundRelayMessage>()
     private val jobs = mutableListOf<Job>()
     private val flushMutex = Mutex()
     @Volatile
@@ -57,33 +59,78 @@ class NtfyBridgeTransport(
         jobs += scope.launch {
             subscribeLoop(topic = ntfySettings.senderToReceiverTopic)
         }
+        jobs += scope.launch {
+            MediaBridgeBus.commands.collect { payload ->
+                enqueue(
+                    BridgeMessage(
+                        type = BridgeMessageType.MediaCommand,
+                        command = payload
+                    ),
+                    topic = ntfySettings.receiverToSenderTopic,
+                    targetRole = BridgeRole.Source
+                )
+                flushPending()
+            }
+        }
+        jobs += scope.launch {
+            CallBridgeBus.commands.collect { payload ->
+                enqueue(
+                    BridgeMessage(
+                        type = BridgeMessageType.CallCommand,
+                        callCommand = payload
+                    ),
+                    topic = ntfySettings.receiverToSenderTopic,
+                    targetRole = BridgeRole.Source
+                )
+                flushPending()
+            }
+        }
+        jobs += scope.launch {
+            while (isActive) {
+                delay(RETRY_FLUSH_INTERVAL_MS)
+                flushPending()
+            }
+        }
     }
 
     override fun startClient(serverIp: String, port: Int) {
         stop()
         if (!validateSettings()) return
         DiagnosticsLog.add("ntfy Sender ready for ${ntfySettings.senderToReceiverTopic}")
-        onStateChanged(BridgeConnectionState.Connected, "ntfy relay ready")
+        onStateChanged(BridgeConnectionState.Connecting, "Connecting to ntfy relay")
+        jobs += scope.launch {
+            subscribeLoop(topic = ntfySettings.receiverToSenderTopic)
+        }
         jobs += scope.launch {
             NotificationEventBus.events.collect { payload ->
                 enqueue(
                     BridgeMessage(
                         type = BridgeMessageType.NotificationEvent,
                         payload = payload
-                    )
+                    ),
+                    topic = ntfySettings.senderToReceiverTopic,
+                    targetRole = BridgeRole.Sink
                 )
                 flushPending()
             }
         }
         jobs += scope.launch {
             MediaBridgeBus.updates.collect { payload ->
-                enqueue(mediaUpdateMessage(payload))
+                enqueue(
+                    mediaUpdateMessage(payload),
+                    topic = ntfySettings.senderToReceiverTopic,
+                    targetRole = BridgeRole.Sink
+                )
                 flushPending()
             }
         }
         jobs += scope.launch {
             MediaBridgeBus.clears.collect {
-                enqueue(BridgeMessage(type = BridgeMessageType.MediaClear))
+                enqueue(
+                    BridgeMessage(type = BridgeMessageType.MediaClear),
+                    topic = ntfySettings.senderToReceiverTopic,
+                    targetRole = BridgeRole.Sink
+                )
                 flushPending()
             }
         }
@@ -119,9 +166,19 @@ class NtfyBridgeTransport(
         return true
     }
 
-    private fun enqueue(message: BridgeMessage) {
+    private fun enqueue(
+        message: BridgeMessage,
+        topic: String,
+        targetRole: BridgeRole
+    ) {
         synchronized(pendingMessages) {
-            pendingMessages.addLast(message)
+            pendingMessages.addLast(
+                OutboundRelayMessage(
+                    message = message,
+                    topic = topic,
+                    targetRole = targetRole
+                )
+            )
             while (pendingMessages.size > MAX_PENDING_MESSAGES) {
                 pendingMessages.removeFirst()
                 DiagnosticsLog.add("ntfy pending queue trimmed")
@@ -148,10 +205,10 @@ class NtfyBridgeTransport(
         }
     }
 
-    private suspend fun publishWithRetry(message: BridgeMessage): Boolean {
+    private suspend fun publishWithRetry(outbound: OutboundRelayMessage): Boolean {
         repeat(PUBLISH_RETRY_COUNT) { attempt ->
             try {
-                publish(message)
+                publish(outbound)
                 onEventTransferred()
                 return true
             } catch (cancellation: CancellationException) {
@@ -165,12 +222,12 @@ class NtfyBridgeTransport(
         return false
     }
 
-    private fun publish(message: BridgeMessage) {
+    private fun publish(outbound: OutboundRelayMessage) {
         val envelopeText = relayEnvelopeCodec.encode(
-            message = message,
-            targetRole = BridgeRole.Sink
+            message = outbound.message,
+            targetRole = outbound.targetRole
         )
-        val connection = openConnection(ntfySettings.senderToReceiverTopic).apply {
+        val connection = openConnection(outbound.topic).apply {
             requestMethod = "POST"
             doOutput = true
             setRequestProperty("Content-Type", "text/plain; charset=utf-8")
@@ -183,7 +240,7 @@ class NtfyBridgeTransport(
         if (responseCode !in 200..299) {
             error("HTTP $responseCode")
         }
-        DiagnosticsLog.add("ntfy published ${message.type.name}")
+        DiagnosticsLog.add("ntfy published ${outbound.message.type.name}")
         onStateChanged(BridgeConnectionState.Connected, "ntfy relay ready")
     }
 
@@ -270,8 +327,22 @@ class NtfyBridgeTransport(
                 onMediaCleared()
                 onEventTransferred()
             }
+            BridgeMessageType.MediaCommand -> {
+                message.command?.let { command ->
+                    DiagnosticsLog.add("ntfy media command received: ${command.action.name}")
+                    onMediaCommandReceived(command)
+                    onEventTransferred()
+                }
+            }
+            BridgeMessageType.CallCommand -> {
+                message.callCommand?.let { command ->
+                    DiagnosticsLog.add("ntfy call command received: ${command.action.name}")
+                    onCallCommandReceived(command)
+                    onEventTransferred()
+                }
+            }
             else -> {
-                DiagnosticsLog.add("ntfy message ignored on Receiver: ${message.type.name}")
+                DiagnosticsLog.add("ntfy message ignored: ${message.type.name}")
             }
         }
     }
@@ -282,14 +353,25 @@ class NtfyBridgeTransport(
             media = payload
         )
         val encodedWithArtwork = relayEnvelopeCodec.encode(messageWithArtwork, BridgeRole.Sink)
-        if (encodedWithArtwork.length <= MAX_NTFY_TEXT_BYTES || payload.artworkBase64 == null) {
+        val encodedWithArtworkBytes = MediaArtworkPolicy.utf8Size(encodedWithArtwork)
+        val artworkBase64Size = MediaArtworkPolicy.artworkBase64Size(payload)
+        DiagnosticsLog.add(
+            "ntfy media payload size: ${encodedWithArtworkBytes}B, artwork: ${artworkBase64Size} chars"
+        )
+        if (
+            encodedWithArtworkBytes <= MediaArtworkPolicy.NTFY_INLINE_PAYLOAD_LIMIT_BYTES ||
+            payload.artworkBase64 == null
+        ) {
             return messageWithArtwork
         }
-        DiagnosticsLog.add("ntfy media artwork omitted: payload too large")
-        return BridgeMessage(
-            type = BridgeMessageType.MediaUpdate,
-            media = payload.copy(artworkBase64 = null)
+        val messageWithoutArtwork = MediaArtworkPolicy.withoutArtwork(messageWithArtwork)
+        val encodedWithoutArtworkBytes = MediaArtworkPolicy.utf8Size(
+            relayEnvelopeCodec.encode(messageWithoutArtwork, BridgeRole.Sink)
         )
+        DiagnosticsLog.add(
+            "ntfy media artwork omitted: ${encodedWithArtworkBytes}B -> ${encodedWithoutArtworkBytes}B"
+        )
+        return messageWithoutArtwork
     }
 
     private fun openConnection(path: String): HttpURLConnection {
@@ -314,10 +396,15 @@ class NtfyBridgeTransport(
         val message: String? = null
     )
 
+    private data class OutboundRelayMessage(
+        val message: BridgeMessage,
+        val topic: String,
+        val targetRole: BridgeRole
+    )
+
     companion object {
         private const val MAX_PENDING_MESSAGES = 64
         private const val PUBLISH_RETRY_COUNT = 3
         private const val RETRY_FLUSH_INTERVAL_MS = 15_000L
-        private const val MAX_NTFY_TEXT_BYTES = 3_500
     }
 }

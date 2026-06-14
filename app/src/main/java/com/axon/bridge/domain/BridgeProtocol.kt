@@ -23,11 +23,16 @@ data class RelayEnvelope(
     val createdAt: Long,
     val messageType: BridgeMessageType,
     val payloadVersion: Int = RELAY_PAYLOAD_VERSION,
-    val bridgePayload: BridgeMessage
+    val bridgePayload: BridgeMessage? = null,
+    val encryption: String = ENCRYPTION_NONE,
+    val nonceBase64: String? = null,
+    val encryptedPayloadBase64: String? = null
 ) {
     companion object {
         const val RELAY_SCHEMA = "axon.relay.v1"
         const val RELAY_PAYLOAD_VERSION = 1
+        const val ENCRYPTION_NONE = "none"
+        const val ENCRYPTION_AES_GCM = "aes-256-gcm"
     }
 }
 

@@ -11,6 +11,7 @@ import java.util.UUID
 
 class RelayEnvelopeCodec(
     private val pairId: String,
+    private val pairSecret: String,
     private val localDeviceId: String,
     private val localRole: BridgeRole,
     private val dedupeCache: RelayDedupeCache = RelayDedupeCache()
@@ -21,14 +22,23 @@ class RelayEnvelopeCodec(
     }
 
     fun encode(message: BridgeMessage, targetRole: BridgeRole): String {
-        val envelope = RelayEnvelope(
+        val baseEnvelope = RelayEnvelope(
             messageId = UUID.randomUUID().toString(),
             pairId = normalizedPairId(),
             sourceDeviceId = localDeviceId,
             targetRole = targetRole,
             createdAt = System.currentTimeMillis(),
             messageType = message.type,
-            bridgePayload = message
+            encryption = RelayEnvelope.ENCRYPTION_AES_GCM
+        )
+        val encryptedPayload = RelayCrypto.encrypt(
+            plainText = json.encodeToString(message),
+            pairSecret = pairSecret,
+            aad = RelayCrypto.aadFor(baseEnvelope)
+        )
+        val envelope = baseEnvelope.copy(
+            nonceBase64 = encryptedPayload.nonceBase64,
+            encryptedPayloadBase64 = encryptedPayload.encryptedPayloadBase64
         )
         return json.encodeToString(envelope)
     }
@@ -60,10 +70,6 @@ class RelayEnvelopeCodec(
             DiagnosticsLog.add("Relay message malformed: missing message ID")
             return RelayEnvelopeDecodeResult.Malformed("Missing message ID")
         }
-        if (envelope.messageType != envelope.bridgePayload.type) {
-            DiagnosticsLog.add("Relay message malformed: envelope type mismatch")
-            return RelayEnvelopeDecodeResult.Malformed("Message type mismatch")
-        }
         if (envelope.pairId.toNtfyTopicSegment() != normalizedPairId()) {
             DiagnosticsLog.add("Relay message ignored: wrong pair")
             return RelayEnvelopeDecodeResult.Ignored("Wrong pair ID")
@@ -80,9 +86,35 @@ class RelayEnvelopeCodec(
             DiagnosticsLog.add("Relay message ignored: duplicate ${envelope.messageId.take(8)}")
             return RelayEnvelopeDecodeResult.Ignored("Duplicate message")
         }
+        val bridgePayload = decryptPayload(envelope) ?: return RelayEnvelopeDecodeResult.Malformed("Payload decrypt failed")
+        if (envelope.messageType != bridgePayload.type) {
+            DiagnosticsLog.add("Relay message malformed: envelope type mismatch")
+            return RelayEnvelopeDecodeResult.Malformed("Message type mismatch")
+        }
 
         DiagnosticsLog.add("Relay message accepted: ${envelope.messageType.name}")
-        return RelayEnvelopeDecodeResult.Accepted(envelope, envelope.bridgePayload)
+        return RelayEnvelopeDecodeResult.Accepted(envelope, bridgePayload)
+    }
+
+    private fun decryptPayload(envelope: RelayEnvelope): BridgeMessage? {
+        if (envelope.encryption != RelayEnvelope.ENCRYPTION_AES_GCM) {
+            DiagnosticsLog.add("Relay message rejected: payload is not encrypted")
+            return null
+        }
+        if (pairSecret.isBlank()) {
+            DiagnosticsLog.add("Relay message rejected: pair secret missing")
+            return null
+        }
+        return runCatching {
+            val plainText = RelayCrypto.decrypt(
+                envelope = envelope,
+                pairSecret = pairSecret,
+                aad = RelayCrypto.aadFor(envelope)
+            )
+            json.decodeFromString<BridgeMessage>(plainText)
+        }.onFailure {
+            DiagnosticsLog.add("Relay message rejected: authentication failed")
+        }.getOrNull()
     }
 
     private fun normalizedPairId(): String = pairId.toNtfyTopicSegment()

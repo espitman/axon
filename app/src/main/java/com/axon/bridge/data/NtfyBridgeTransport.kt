@@ -39,6 +39,7 @@ class NtfyBridgeTransport(
 ) : BridgeTransport {
     private val relayEnvelopeCodec = RelayEnvelopeCodec(
         pairId = ntfySettings.pairId,
+        pairSecret = ntfySettings.pairSecret,
         localDeviceId = localDeviceId,
         localRole = localRole
     )
@@ -161,6 +162,7 @@ class NtfyBridgeTransport(
             !ntfySettings.serverUrl.startsWith("https://") && !ntfySettings.serverUrl.startsWith("http://") ->
                 "ntfy server URL is invalid"
             ntfySettings.pairId.isBlank() -> "ntfy pair ID is required"
+            ntfySettings.pairSecret.isBlank() -> "ntfy pair secret is required"
             ntfySettings.username.isBlank() -> "ntfy username is required"
             ntfySettings.password.isBlank() -> "ntfy password or token is required"
             else -> null
@@ -178,12 +180,16 @@ class NtfyBridgeTransport(
         topic: String,
         targetRole: BridgeRole
     ) {
+        val envelopeText = relayEnvelopeCodec.encode(
+            message = message,
+            targetRole = targetRole
+        )
         synchronized(pendingMessages) {
             pendingMessages.addLast(
                 NtfyPendingMessage(
-                    message = message,
+                    envelopeText = envelopeText,
+                    messageType = message.type,
                     topic = topic,
-                    targetRole = targetRole
                 )
             )
             while (pendingMessages.size > MAX_PENDING_MESSAGES) {
@@ -243,24 +249,20 @@ class NtfyBridgeTransport(
     }
 
     private fun publish(outbound: NtfyPendingMessage) {
-        val envelopeText = relayEnvelopeCodec.encode(
-            message = outbound.message,
-            targetRole = outbound.targetRole
-        )
         val connection = openConnection(outbound.topic).apply {
             requestMethod = "POST"
             doOutput = true
             setRequestProperty("Content-Type", "text/plain; charset=utf-8")
         }
         connection.outputStream.use { output ->
-            output.write(envelopeText.toByteArray(Charsets.UTF_8))
+            output.write(outbound.envelopeText.toByteArray(Charsets.UTF_8))
         }
         val responseCode = connection.responseCode
         connection.disconnect()
         if (responseCode !in 200..299) {
             throw NtfyHttpException(responseCode)
         }
-        DiagnosticsLog.add("ntfy published ${outbound.message.type.name}")
+        DiagnosticsLog.add("ntfy published ${outbound.messageType.name}")
         onStateChanged(BridgeConnectionState.Connected, "ntfy relay ready")
     }
 
@@ -355,14 +357,14 @@ class NtfyBridgeTransport(
         when (message.type) {
             BridgeMessageType.NotificationEvent -> {
                 message.payload?.let { payload ->
-                    DiagnosticsLog.add("ntfy received ${payload.category.name}: ${payload.title}")
+                    DiagnosticsLog.add("ntfy received ${payload.category.name}")
                     onNotificationReceived(payload)
                     onEventTransferred()
                 }
             }
             BridgeMessageType.MediaUpdate -> {
                 message.media?.let { media ->
-                    DiagnosticsLog.add("ntfy media update received: ${media.title}")
+                    DiagnosticsLog.add("ntfy media update received")
                     onMediaUpdateReceived(media)
                     onEventTransferred()
                 }

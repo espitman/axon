@@ -25,6 +25,7 @@ import com.axon.bridge.data.DeviceInfoProvider
 import com.axon.bridge.data.DiagnosticsLog
 import com.axon.bridge.data.MediaBridgeBus
 import com.axon.bridge.data.NetworkInfoProvider
+import com.axon.bridge.data.NtfyPendingMessageStore
 import com.axon.bridge.data.ReceiverDiscoveryScanner
 import com.axon.bridge.data.SmsArchiveStore
 import com.axon.bridge.domain.BridgeConnectionState
@@ -148,6 +149,31 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun generateNtfyPairId() {
         settings.ntfyPairId = AxonSettings.generatePairId()
         DiagnosticsLog.add("Generated ntfy pair ID")
+        refresh()
+    }
+
+    fun generateNtfyPairSecret() {
+        val current = settings.ntfySettings
+        settings.ntfySettings = current.copy(pairSecret = AxonSettings.generatePairSecret())
+        DiagnosticsLog.add("Generated ntfy pair secret")
+        refresh()
+    }
+
+    fun unpairNtfy() {
+        if (BridgeService.isRunning.value) {
+            appContext.stopService(Intent(appContext, BridgeService::class.java))
+        }
+        settings.ntfySettings = settings.ntfySettings.copy(
+            pairId = AxonSettings.generatePairId(),
+            pairSecret = ""
+        )
+        NtfyPendingMessageStore(appContext).clear()
+        BridgeService.publishState(
+            BridgeConnectionState.Disconnected,
+            false,
+            "ntfy pair removed. Create a new pair secret."
+        )
+        DiagnosticsLog.add("ntfy pair removed")
         refresh()
     }
 
@@ -475,6 +501,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (ntfySettings.pairId.toNtfyTopicSegment().isBlank()) {
             return "Pair ID is required"
+        }
+        if (ntfySettings.pairSecret.isBlank()) {
+            return "Pair secret is required"
         }
         if (ntfySettings.username.isBlank()) {
             return "Username is required"

@@ -52,6 +52,12 @@ class AxonSettings(context: Context) {
             preferences.edit().putString(KEY_NTFY_PAIR_ID, value.trim()).apply()
         }
 
+    var ntfyPairSecret: String
+        get() = preferences.getString(KEY_NTFY_PAIR_SECRET, "") ?: ""
+        set(value) {
+            preferences.edit().putString(KEY_NTFY_PAIR_SECRET, value.trim()).apply()
+        }
+
     var ntfyUsername: String
         get() = preferences.getString(KEY_NTFY_USERNAME, "") ?: ""
         set(value) {
@@ -83,6 +89,7 @@ class AxonSettings(context: Context) {
         get() = NtfySettings(
             serverUrl = ntfyServerUrl,
             pairId = ntfyPairId,
+            pairSecret = ntfyPairSecret,
             username = ntfyUsername,
             password = ntfyPassword,
             topicPrefix = ntfyTopicPrefix
@@ -91,6 +98,7 @@ class AxonSettings(context: Context) {
             preferences.edit()
                 .putString(KEY_NTFY_SERVER_URL, value.serverUrl.trim())
                 .putString(KEY_NTFY_PAIR_ID, value.pairId.trim())
+                .putString(KEY_NTFY_PAIR_SECRET, value.pairSecret.trim())
                 .putString(KEY_NTFY_USERNAME, value.username.trim())
                 .putString(KEY_NTFY_PASSWORD, value.password)
                 .putString(KEY_NTFY_TOPIC_PREFIX, value.topicPrefix.trim())
@@ -105,6 +113,7 @@ class AxonSettings(context: Context) {
         private const val KEY_TRANSPORT_MODE = "transport_mode"
         private const val KEY_NTFY_SERVER_URL = "ntfy_server_url"
         private const val KEY_NTFY_PAIR_ID = "ntfy_pair_id"
+        private const val KEY_NTFY_PAIR_SECRET = "ntfy_pair_secret"
         private const val KEY_NTFY_USERNAME = "ntfy_username"
         private const val KEY_NTFY_PASSWORD = "ntfy_password"
         private const val KEY_NTFY_TOPIC_PREFIX = "ntfy_topic_prefix"
@@ -115,6 +124,13 @@ class AxonSettings(context: Context) {
                 .toString()
                 .replace("-", "")
                 .take(12)
+        }
+
+        fun generatePairSecret(): String {
+            return UUID.randomUUID()
+                .toString()
+                .replace("-", "") +
+                UUID.randomUUID().toString().replace("-", "")
         }
     }
 }

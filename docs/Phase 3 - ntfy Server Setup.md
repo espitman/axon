@@ -253,6 +253,7 @@ Sender device:
 ```text
 Server URL: https://axon-ntfy.liara.run
 Pair ID: p1-test
+Pair secret: shared secret generated in Axon
 Username: axon_sender
 Password: sender password
 Publish topic: axon-p1-test-to-receiver
@@ -264,6 +265,7 @@ Receiver device:
 ```text
 Server URL: https://axon-ntfy.liara.run
 Pair ID: p1-test
+Pair secret: same shared secret as Sender
 Username: axon_receiver
 Password: receiver password
 Subscribe topic: axon-p1-test-to-receiver
@@ -274,6 +276,7 @@ Publish topic: axon-p1-test-to-sender
 
 - Use Basic Auth for the first implementation slice.
 - Later, move to ntfy access tokens so the app does not store raw account passwords.
+- Axon relay payloads are encrypted with an app-level pair secret before publish.
 - Use `json?poll=1` only for manual tests and cached-message checks.
 - The app should use a live subscription endpoint, either:
   - `https://axon-ntfy.liara.run/<topic>/json`
@@ -288,6 +291,6 @@ Before using this with real personal data for more than local testing:
 
 - Replace test passwords with strong unique passwords.
 - Prefer access tokens over account passwords in the Android app.
-- Add app-level encryption so ntfy cannot read SMS/call/media payload content.
+- Keep the Axon pair secret private and identical on both paired devices.
 - Keep `deny-all` enabled for anonymous/default access.
 - Confirm `/var/lib/ntfy/user.db` is persisted across deploys.

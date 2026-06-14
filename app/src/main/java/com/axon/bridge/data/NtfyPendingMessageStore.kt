@@ -1,8 +1,7 @@
 package com.axon.bridge.data
 
 import android.content.Context
-import com.axon.bridge.domain.BridgeMessage
-import com.axon.bridge.domain.BridgeRole
+import com.axon.bridge.domain.BridgeMessageType
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -35,6 +34,11 @@ class NtfyPendingMessageStore(context: Context) {
             .apply()
     }
 
+    @Synchronized
+    fun clear() {
+        preferences.edit().remove(KEY_PENDING).apply()
+    }
+
     companion object {
         private const val KEY_PENDING = "pending_messages"
         private const val MAX_STORED_MESSAGES = 64
@@ -43,8 +47,8 @@ class NtfyPendingMessageStore(context: Context) {
 
 @Serializable
 data class NtfyPendingMessage(
-    val message: BridgeMessage,
+    val envelopeText: String,
+    val messageType: BridgeMessageType,
     val topic: String,
-    val targetRole: BridgeRole,
     val queuedAt: Long = System.currentTimeMillis()
 )

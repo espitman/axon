@@ -287,19 +287,30 @@ Implementation files:
 
 ## Milestone 9: Security Hardening
 
-- [ ] Add app-level pair secret.
-- [ ] Encrypt relay payloads before publishing to ntfy.
-- [ ] Authenticate message envelopes.
-- [ ] Add key rotation or re-pairing behavior.
-- [ ] Add a clear "unpair" action.
-- [ ] Remove sensitive payloads from verbose diagnostics.
-- [ ] Review local storage of ntfy tokens and pair secrets.
+- [x] Add app-level pair secret.
+- [x] Encrypt relay payloads before publishing to ntfy.
+- [x] Authenticate message envelopes.
+- [x] Add key rotation or re-pairing behavior.
+- [x] Add a clear "unpair" action.
+- [x] Remove sensitive payloads from verbose diagnostics.
+- [x] Review local storage of ntfy tokens and pair secrets.
 
 Verification:
 
-- [ ] ntfy server operators cannot read SMS/call/media payload content.
-- [ ] Messages tampered with in transit are rejected.
-- [ ] Unpairing stops both directions from accepting old messages.
+- [x] Debug build succeeds after relay encryption and unpair changes.
+- [x] ntfy server operators cannot read SMS/call/media payload content.
+- [x] Messages tampered with in transit are rejected by AES-GCM authentication.
+- [x] Unpairing stops both directions from accepting old messages by rotating pair ID and clearing pair secret.
+
+Implementation files:
+
+- `app/src/main/java/com/axon/bridge/data/RelayCrypto.kt`
+- `app/src/main/java/com/axon/bridge/data/RelayEnvelopeCodec.kt`
+- `app/src/main/java/com/axon/bridge/domain/BridgeProtocol.kt`
+- `app/src/main/java/com/axon/bridge/domain/BridgeModels.kt`
+- `app/src/main/java/com/axon/bridge/data/NtfyPendingMessageStore.kt`
+- `app/src/main/java/com/axon/bridge/presentation/HomeViewModel.kt`
+- `app/src/main/java/com/axon/bridge/MainActivity.kt`
 
 ## Milestone 10: Documentation And Public Release Readiness
 

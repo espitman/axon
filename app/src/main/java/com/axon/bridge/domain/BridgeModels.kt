@@ -59,6 +59,7 @@ data class HomeState(
 data class NtfySettings(
     val serverUrl: String = "",
     val pairId: String = "",
+    val pairSecret: String = "",
     val username: String = "",
     val password: String = "",
     val topicPrefix: String = "axon"

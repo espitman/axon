@@ -411,6 +411,8 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                         onTransportModeSelected = viewModel::selectTransportMode,
                         onNtfySettingsChanged = viewModel::updateNtfySettings,
                         onGenerateNtfyPairId = viewModel::generateNtfyPairId,
+                        onGenerateNtfyPairSecret = viewModel::generateNtfyPairSecret,
+                        onUnpairNtfy = viewModel::unpairNtfy,
                         onTestNtfyConnection = viewModel::testNtfyConnection,
                         onReconnectBridge = viewModel::reconnectBridge,
                         onBack = { currentPage = AxonPage.Home },
@@ -2136,6 +2138,8 @@ private fun SettingsScreen(
     onTransportModeSelected: (BridgeTransportMode) -> Unit,
     onNtfySettingsChanged: (NtfySettings) -> Unit,
     onGenerateNtfyPairId: () -> Unit,
+    onGenerateNtfyPairSecret: () -> Unit,
+    onUnpairNtfy: () -> Unit,
     onTestNtfyConnection: (NtfySettings) -> Unit,
     onReconnectBridge: () -> Unit,
     onBack: () -> Unit,
@@ -2211,6 +2215,8 @@ private fun SettingsScreen(
                 onNtfySettingsChanged = { draftNtfySettings = it },
                 onSaveNtfySettings = { onNtfySettingsChanged(draftNtfySettings) },
                 onGeneratePairId = onGenerateNtfyPairId,
+                onGeneratePairSecret = onGenerateNtfyPairSecret,
+                onUnpair = onUnpairNtfy,
                 onTestNtfyConnection = { onTestNtfyConnection(draftNtfySettings) }
             )
             Card(
@@ -2288,6 +2294,8 @@ private fun TransportSettingsPanel(
     onNtfySettingsChanged: (NtfySettings) -> Unit,
     onSaveNtfySettings: () -> Unit,
     onGeneratePairId: () -> Unit,
+    onGeneratePairSecret: () -> Unit,
+    onUnpair: () -> Unit,
     onTestNtfyConnection: () -> Unit
 ) {
     Card(
@@ -2338,6 +2346,8 @@ private fun TransportSettingsPanel(
                     onNtfySettingsChanged = onNtfySettingsChanged,
                     onSave = onSaveNtfySettings,
                     onGeneratePairId = onGeneratePairId,
+                    onGeneratePairSecret = onGeneratePairSecret,
+                    onUnpair = onUnpair,
                     onTest = onTestNtfyConnection
                 )
             } else {
@@ -2358,6 +2368,8 @@ private fun NtfySettingsFields(
     onNtfySettingsChanged: (NtfySettings) -> Unit,
     onSave: () -> Unit,
     onGeneratePairId: () -> Unit,
+    onGeneratePairSecret: () -> Unit,
+    onUnpair: () -> Unit,
     onTest: () -> Unit
 ) {
     Column(
@@ -2385,6 +2397,27 @@ private fun NtfySettingsFields(
             CompactActionButton(
                 text = "Generate",
                 onClick = onGeneratePairId,
+                modifier = Modifier
+                    .width(116.dp)
+                    .padding(top = 8.dp)
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SettingsTextField(
+                value = ntfySettings.pairSecret,
+                onValueChange = { onNtfySettingsChanged(ntfySettings.copy(pairSecret = it)) },
+                label = "Pair secret",
+                placeholder = "Shared secret",
+                isSecret = true,
+                modifier = Modifier.weight(1f)
+            )
+            CompactActionButton(
+                text = "Secret",
+                onClick = onGeneratePairSecret,
                 modifier = Modifier
                     .width(116.dp)
                     .padding(top = 8.dp)
@@ -2470,6 +2503,11 @@ private fun NtfySettingsFields(
                 Text("Save", fontWeight = FontWeight.Bold, maxLines = 1)
             }
         }
+        CompactActionButton(
+            text = "Unpair ntfy",
+            onClick = onUnpair,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 

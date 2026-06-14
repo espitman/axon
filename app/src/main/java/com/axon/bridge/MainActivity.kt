@@ -412,6 +412,7 @@ private fun AxonHomeScreen(viewModel: HomeViewModel = viewModel()) {
                         onNtfySettingsChanged = viewModel::updateNtfySettings,
                         onGenerateNtfyPairId = viewModel::generateNtfyPairId,
                         onTestNtfyConnection = viewModel::testNtfyConnection,
+                        onReconnectBridge = viewModel::reconnectBridge,
                         onBack = { currentPage = AxonPage.Home },
                         onPing = viewModel::pingPeer,
                         onClearDiagnostics = viewModel::clearDiagnostics,
@@ -2136,6 +2137,7 @@ private fun SettingsScreen(
     onNtfySettingsChanged: (NtfySettings) -> Unit,
     onGenerateNtfyPairId: () -> Unit,
     onTestNtfyConnection: (NtfySettings) -> Unit,
+    onReconnectBridge: () -> Unit,
     onBack: () -> Unit,
     onPing: () -> Unit,
     onClearDiagnostics: () -> Unit,
@@ -2233,7 +2235,11 @@ private fun SettingsScreen(
                             maxLines = 1
                         )
                         Text(
-                            text = "Send a WebSocket ping to the peer",
+                            text = if (state.transportMode == BridgeTransportMode.Ntfy) {
+                                "Reconnect the active ntfy relay"
+                            } else {
+                                "Send a WebSocket ping to the peer"
+                            },
                             color = AxonColor.Muted,
                             fontSize = 13.sp,
                             maxLines = 1,
@@ -2241,7 +2247,7 @@ private fun SettingsScreen(
                         )
                     }
                     Button(
-                        onClick = onPing,
+                        onClick = if (state.transportMode == BridgeTransportMode.Ntfy) onReconnectBridge else onPing,
                         modifier = Modifier.height(42.dp),
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -2250,7 +2256,7 @@ private fun SettingsScreen(
                         )
                     ) {
                         Text(
-                            text = "Ping",
+                            text = if (state.transportMode == BridgeTransportMode.Ntfy) "Reconnect" else "Ping",
                             fontWeight = FontWeight.Bold,
                             maxLines = 1
                         )

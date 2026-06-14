@@ -257,23 +257,33 @@ Implementation files:
 
 ## Milestone 8: Reliability And Offline Behavior
 
-- [ ] Add startup recovery using ntfy cached messages or a `since` strategy.
-- [ ] Add local message dedupe cache with expiry.
-- [ ] Add bounded retry queue for outbound messages.
-- [ ] Add clear bridge states for:
-  - [ ] connecting
-  - [ ] subscribed
-  - [ ] publishing failed
-  - [ ] auth failed
-  - [ ] server unreachable
-- [ ] Add a manual reconnect action.
-- [ ] Add diagnostics filtering so ntfy logs stay readable.
+- [x] Add startup recovery using ntfy cached messages with a bounded `since=10m` strategy.
+- [x] Add local message dedupe cache with expiry.
+- [x] Add bounded retry queue for outbound messages.
+- [x] Persist the bounded retry queue across short service restarts.
+- [x] Add clear bridge states for:
+  - [x] connecting
+  - [x] subscribed
+  - [x] publishing failed
+  - [x] auth failed
+  - [x] server unreachable
+- [x] Add a manual reconnect action.
+- [x] Add diagnostics filtering so ntfy logs stay readable.
 
 Verification:
 
+- [x] Debug build succeeds after reliability/offline behavior changes.
 - [ ] Restarting Receiver does not replay old SMS endlessly.
 - [ ] Short network outages recover without manual restart.
 - [ ] Auth errors are visible and not treated as normal disconnects.
+
+Implementation files:
+
+- `app/src/main/java/com/axon/bridge/data/NtfyBridgeTransport.kt`
+- `app/src/main/java/com/axon/bridge/data/NtfyPendingMessageStore.kt`
+- `app/src/main/java/com/axon/bridge/data/RelayEnvelopeCodec.kt`
+- `app/src/main/java/com/axon/bridge/presentation/HomeViewModel.kt`
+- `app/src/main/java/com/axon/bridge/MainActivity.kt`
 
 ## Milestone 9: Security Hardening
 

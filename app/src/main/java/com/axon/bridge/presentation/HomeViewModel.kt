@@ -193,14 +193,28 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             appContext.stopService(Intent(appContext, BridgeService::class.java))
             BridgeService.publishState(BridgeConnectionState.Disconnected, false)
         } else {
-            val intent = Intent(appContext, BridgeService::class.java).apply {
-                action = BridgeService.ACTION_START
-                putExtra(BridgeService.EXTRA_ROLE, settings.role.name)
-                putExtra(BridgeService.EXTRA_SERVER_IP, settings.serverIp)
-            }
-            ContextCompat.startForegroundService(appContext, intent)
+            startBridgeService()
         }
         refresh()
+    }
+
+    fun reconnectBridge() {
+        DiagnosticsLog.add("Bridge reconnect requested")
+        if (BridgeService.isRunning.value) {
+            appContext.stopService(Intent(appContext, BridgeService::class.java))
+        }
+        BridgeService.publishState(BridgeConnectionState.Connecting, false, "Reconnect requested")
+        startBridgeService()
+        refresh()
+    }
+
+    private fun startBridgeService() {
+        val intent = Intent(appContext, BridgeService::class.java).apply {
+            action = BridgeService.ACTION_START
+            putExtra(BridgeService.EXTRA_ROLE, settings.role.name)
+            putExtra(BridgeService.EXTRA_SERVER_IP, settings.serverIp)
+        }
+        ContextCompat.startForegroundService(appContext, intent)
     }
 
     fun openPermissionSettings() {

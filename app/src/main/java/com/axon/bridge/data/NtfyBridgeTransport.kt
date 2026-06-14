@@ -26,6 +26,7 @@ import java.net.URL
 class NtfyBridgeTransport(
     private val scope: CoroutineScope,
     private val ntfySettings: NtfySettings,
+    private val pendingStore: NtfyPendingMessageStore,
     localDeviceId: String,
     private val localRole: BridgeRole,
     private val onStateChanged: (BridgeConnectionState, String?) -> Unit,
@@ -45,15 +46,18 @@ class NtfyBridgeTransport(
         ignoreUnknownKeys = true
         encodeDefaults = true
     }
-    private val pendingMessages = ArrayDeque<OutboundRelayMessage>()
+    private val pendingMessages = ArrayDeque<NtfyPendingMessage>()
     private val jobs = mutableListOf<Job>()
     private val flushMutex = Mutex()
     @Volatile
     private var activeSubscription: HttpURLConnection? = null
+    @Volatile
+    private var hasSubscribedOnce = false
 
     override fun startServer(host: String, port: Int) {
         stop()
         if (!validateSettings()) return
+        restorePendingMessages()
         DiagnosticsLog.add("ntfy Receiver subscribing to ${ntfySettings.senderToReceiverTopic}")
         onStateChanged(BridgeConnectionState.Connecting, "Connecting to ntfy relay")
         jobs += scope.launch {
@@ -96,6 +100,7 @@ class NtfyBridgeTransport(
     override fun startClient(serverIp: String, port: Int) {
         stop()
         if (!validateSettings()) return
+        restorePendingMessages()
         DiagnosticsLog.add("ntfy Sender ready for ${ntfySettings.senderToReceiverTopic}")
         onStateChanged(BridgeConnectionState.Connecting, "Connecting to ntfy relay")
         jobs += scope.launch {
@@ -153,6 +158,8 @@ class NtfyBridgeTransport(
     private fun validateSettings(): Boolean {
         val error = when {
             ntfySettings.serverUrl.isBlank() -> "ntfy server URL is required"
+            !ntfySettings.serverUrl.startsWith("https://") && !ntfySettings.serverUrl.startsWith("http://") ->
+                "ntfy server URL is invalid"
             ntfySettings.pairId.isBlank() -> "ntfy pair ID is required"
             ntfySettings.username.isBlank() -> "ntfy username is required"
             ntfySettings.password.isBlank() -> "ntfy password or token is required"
@@ -173,7 +180,7 @@ class NtfyBridgeTransport(
     ) {
         synchronized(pendingMessages) {
             pendingMessages.addLast(
-                OutboundRelayMessage(
+                NtfyPendingMessage(
                     message = message,
                     topic = topic,
                     targetRole = targetRole
@@ -182,6 +189,17 @@ class NtfyBridgeTransport(
             while (pendingMessages.size > MAX_PENDING_MESSAGES) {
                 pendingMessages.removeFirst()
                 DiagnosticsLog.add("ntfy pending queue trimmed")
+            }
+            savePendingMessagesLocked()
+        }
+    }
+
+    private fun restorePendingMessages() {
+        synchronized(pendingMessages) {
+            pendingMessages.clear()
+            pendingStore.load().forEach { pendingMessages.addLast(it) }
+            if (pendingMessages.isNotEmpty()) {
+                DiagnosticsLog.add("ntfy restored ${pendingMessages.size} pending message(s)")
             }
         }
     }
@@ -199,13 +217,14 @@ class NtfyBridgeTransport(
                 synchronized(pendingMessages) {
                     if (pendingMessages.firstOrNull() == next) {
                         pendingMessages.removeFirst()
+                        savePendingMessagesLocked()
                     }
                 }
             }
         }
     }
 
-    private suspend fun publishWithRetry(outbound: OutboundRelayMessage): Boolean {
+    private suspend fun publishWithRetry(outbound: NtfyPendingMessage): Boolean {
         repeat(PUBLISH_RETRY_COUNT) { attempt ->
             try {
                 publish(outbound)
@@ -214,15 +233,16 @@ class NtfyBridgeTransport(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (error: Throwable) {
-                DiagnosticsLog.add("ntfy publish failed: ${error.message ?: error::class.simpleName}")
-                onStateChanged(BridgeConnectionState.Error, "ntfy publish failed")
+                val message = classifyNetworkError(error, "ntfy publish failed")
+                DiagnosticsLog.add(message)
+                onStateChanged(BridgeConnectionState.Error, message)
                 delay(1_000L * (attempt + 1))
             }
         }
         return false
     }
 
-    private fun publish(outbound: OutboundRelayMessage) {
+    private fun publish(outbound: NtfyPendingMessage) {
         val envelopeText = relayEnvelopeCodec.encode(
             message = outbound.message,
             targetRole = outbound.targetRole
@@ -238,7 +258,7 @@ class NtfyBridgeTransport(
         val responseCode = connection.responseCode
         connection.disconnect()
         if (responseCode !in 200..299) {
-            error("HTTP $responseCode")
+            throw NtfyHttpException(responseCode)
         }
         DiagnosticsLog.add("ntfy published ${outbound.message.type.name}")
         onStateChanged(BridgeConnectionState.Connected, "ntfy relay ready")
@@ -254,8 +274,9 @@ class NtfyBridgeTransport(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (error: Throwable) {
-                DiagnosticsLog.add("ntfy subscribe failed: ${error.message ?: error::class.simpleName}")
-                onStateChanged(BridgeConnectionState.Error, "ntfy subscribe failed")
+                val message = classifyNetworkError(error, "ntfy subscribe failed")
+                DiagnosticsLog.add(message)
+                onStateChanged(BridgeConnectionState.Error, message)
                 delay(backoffMs)
                 backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
             }
@@ -263,7 +284,12 @@ class NtfyBridgeTransport(
     }
 
     private fun subscribe(topic: String) {
-        val connection = openConnection("$topic/json").apply {
+        val subscriptionPath = if (hasSubscribedOnce) {
+            "$topic/json"
+        } else {
+            "$topic/json?since=$STARTUP_RECOVERY_SINCE"
+        }
+        val connection = openConnection(subscriptionPath).apply {
             requestMethod = "GET"
             readTimeout = 0
         }
@@ -271,10 +297,11 @@ class NtfyBridgeTransport(
         val responseCode = connection.responseCode
         if (responseCode !in 200..299) {
             connection.disconnect()
-            error("HTTP $responseCode")
+            throw NtfyHttpException(responseCode)
         }
         DiagnosticsLog.add("ntfy subscription connected")
         onStateChanged(BridgeConnectionState.Connected, "ntfy relay subscribed")
+        hasSubscribedOnce = true
         BufferedReader(InputStreamReader(connection.inputStream)).use { reader ->
             while (true) {
                 val line = reader.readLine() ?: break
@@ -285,6 +312,24 @@ class NtfyBridgeTransport(
         activeSubscription = null
         DiagnosticsLog.add("ntfy subscription disconnected")
         onStateChanged(BridgeConnectionState.Disconnected, null)
+    }
+
+    private fun classifyNetworkError(error: Throwable, fallback: String): String {
+        val httpCode = (error as? NtfyHttpException)?.statusCode
+        return when (httpCode) {
+            401, 403 -> "ntfy auth failed"
+            404 -> "ntfy topic not found"
+            in 500..599 -> "ntfy server unreachable"
+            null -> {
+                val rawMessage = error.message ?: error::class.simpleName ?: fallback
+                when {
+                    rawMessage.contains("Failed to connect", ignoreCase = true) -> "ntfy server unreachable"
+                    rawMessage.contains("timeout", ignoreCase = true) -> "ntfy server timeout"
+                    else -> "$fallback: $rawMessage"
+                }
+            }
+            else -> "$fallback: HTTP $httpCode"
+        }
     }
 
     private fun handleNtfyLine(line: String) {
@@ -396,15 +441,18 @@ class NtfyBridgeTransport(
         val message: String? = null
     )
 
-    private data class OutboundRelayMessage(
-        val message: BridgeMessage,
-        val topic: String,
-        val targetRole: BridgeRole
-    )
+    private fun savePendingMessagesLocked() {
+        pendingStore.save(pendingMessages.toList())
+    }
 
     companion object {
         private const val MAX_PENDING_MESSAGES = 64
         private const val PUBLISH_RETRY_COUNT = 3
         private const val RETRY_FLUSH_INTERVAL_MS = 15_000L
+        private const val STARTUP_RECOVERY_SINCE = "10m"
     }
+
+    private class NtfyHttpException(
+        val statusCode: Int
+    ) : IllegalStateException("HTTP $statusCode")
 }

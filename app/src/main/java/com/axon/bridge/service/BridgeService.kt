@@ -30,6 +30,7 @@ import com.axon.bridge.data.LanBridgeTransport
 import com.axon.bridge.data.MediaBridgeBus
 import com.axon.bridge.data.MediaSessionTracker
 import com.axon.bridge.data.NetworkInfoProvider
+import com.axon.bridge.data.NtfyPendingMessageStore
 import com.axon.bridge.data.NtfyBridgeTransport
 import com.axon.bridge.data.ReceiverDiscoveryScanner
 import com.axon.bridge.data.ShadowMediaSession
@@ -124,6 +125,7 @@ class BridgeService : Service() {
             BridgeTransportMode.Ntfy -> NtfyBridgeTransport(
                 scope = serviceScope,
                 ntfySettings = settings.ntfySettings,
+                pendingStore = NtfyPendingMessageStore(this),
                 localDeviceId = settings.deviceId,
                 localRole = role,
                 onStateChanged = ::updateState,

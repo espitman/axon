@@ -2371,7 +2371,7 @@ private fun SettingsScreen(
                         )
                         Text(
                             text = if (state.transportMode == BridgeTransportMode.Ntfy) {
-                                "Reconnect the active ntfy relay"
+                                "Send an encrypted ntfy ping to the peer"
                             } else {
                                 "Send a WebSocket ping to the peer"
                             },
@@ -2382,7 +2382,7 @@ private fun SettingsScreen(
                         )
                     }
                     Button(
-                        onClick = if (state.transportMode == BridgeTransportMode.Ntfy) onReconnectBridge else onPing,
+                        onClick = onPing,
                         modifier = Modifier.height(42.dp),
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -2658,7 +2658,7 @@ private fun NtfySettingsFields(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             CompactActionButton(
-                text = "Test",
+                text = "Ping pong",
                 onClick = onTest,
                 modifier = Modifier.weight(1f)
             )

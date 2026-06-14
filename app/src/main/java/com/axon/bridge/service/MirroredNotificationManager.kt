@@ -25,6 +25,42 @@ import kotlin.math.absoluteValue
 class MirroredNotificationManager(
     private val context: Context
 ) {
+    fun showBridgeTest(title: String, message: String) {
+        if (!canPostNotifications()) {
+            DiagnosticsLog.add("Cannot show bridge test notification: app notifications denied")
+            return
+        }
+        createChannel()
+        val contentIntent = PendingIntent.getActivity(
+            context,
+            BRIDGE_TEST_NOTIFICATION_ID,
+            Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_axon_mark)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setContentIntent(contentIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setAutoCancel(true)
+            .setWhen(System.currentTimeMillis())
+            .setShowWhen(true)
+            .build()
+
+        runCatching {
+            NotificationManagerCompat.from(context).notify(BRIDGE_TEST_NOTIFICATION_ID, notification)
+        }.onSuccess {
+            DiagnosticsLog.add("Displayed bridge test notification: $title")
+        }.onFailure { error ->
+            DiagnosticsLog.add("Bridge test notification failed: ${error.message ?: error::class.simpleName}")
+        }
+    }
+
     fun show(payload: NotificationPayload) {
         if (!canPostNotifications()) {
             DiagnosticsLog.add("Cannot show mirrored notification: app notifications denied")
@@ -233,6 +269,7 @@ class MirroredNotificationManager(
     companion object {
         private const val CHANNEL_ID = "mirrored_alerts_wear"
         private const val CALL_CHANNEL_ID = "mirrored_incoming_calls_v2"
+        private const val BRIDGE_TEST_NOTIFICATION_ID = 90_101
 
         fun notificationId(payload: NotificationPayload): Int {
             return payload.id.hashCode().absoluteValue

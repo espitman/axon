@@ -177,6 +177,7 @@ Implementation files:
 
 - [x] Implement ntfy publish from Sender to Receiver.
 - [x] Implement ntfy subscribe on Receiver.
+- [x] Use ntfy's long-lived `/json` streaming endpoint with OkHttp for app delivery.
 - [x] Support these message types first:
   - [x] `NOTIFICATION_EVENT`
   - [x] call state inside `NotificationPayload`

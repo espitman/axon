@@ -189,7 +189,7 @@ Main layers:
 
 LAN mode sends `BridgeMessage` JSON over WebSocket.
 
-ntfy mode wraps `BridgeMessage` in an Axon relay envelope, encrypts the bridge payload, and publishes the encrypted envelope text to ntfy.
+ntfy mode wraps `BridgeMessage` in an Axon relay envelope, encrypts the bridge payload, publishes the encrypted envelope text to ntfy with HTTPS `POST`, and receives peer messages through ntfy's long-lived `/json` stream.
 
 Important bridge message types:
 

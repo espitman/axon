@@ -27,8 +27,11 @@ import com.axon.bridge.data.MediaBridgeBus
 import com.axon.bridge.data.NetworkInfoProvider
 import com.axon.bridge.data.NtfyPendingMessageStore
 import com.axon.bridge.data.ReceiverDiscoveryScanner
+import com.axon.bridge.data.RelayEnvelopeCodec
 import com.axon.bridge.data.SmsArchiveStore
 import com.axon.bridge.domain.BridgeConnectionState
+import com.axon.bridge.domain.BridgeMessage
+import com.axon.bridge.domain.BridgeMessageType
 import com.axon.bridge.domain.BridgeRole
 import com.axon.bridge.domain.BridgeTransportMode
 import com.axon.bridge.domain.CallCommandAction
@@ -180,22 +183,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun testNtfyConnection(ntfySettings: NtfySettings = settings.ntfySettings) {
         val validationError = validateNtfySettings(ntfySettings)
         if (validationError != null) {
-            DiagnosticsLog.add("ntfy test skipped: $validationError")
+            DiagnosticsLog.add("ntfy ping skipped: $validationError")
             refresh()
             return
         }
 
         settings.ntfySettings = ntfySettings
-        DiagnosticsLog.add("Testing ntfy connection")
+        DiagnosticsLog.add("Sending ntfy ping")
         refresh()
         viewModelScope.launch(Dispatchers.IO) {
             val result = runCatching {
                 publishNtfyTestMessage(ntfySettings)
             }
             result.onSuccess {
-                DiagnosticsLog.add("ntfy connection test succeeded")
+                DiagnosticsLog.add("ntfy ping published")
             }.onFailure { error ->
-                DiagnosticsLog.add("ntfy connection test failed: ${error.message ?: error::class.simpleName}")
+                DiagnosticsLog.add("ntfy ping failed: ${error.message ?: error::class.simpleName}")
             }
             refresh()
         }
@@ -513,10 +516,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun publishNtfyTestMessage(ntfySettings: NtfySettings) {
         val baseUrl = ntfySettings.serverUrl.trim().trimEnd('/')
-        val topic = when (settings.role) {
-            BridgeRole.Source -> ntfySettings.senderToReceiverTopic
-            BridgeRole.Sink -> ntfySettings.receiverToSenderTopic
+        val targetRole = when (settings.role) {
+            BridgeRole.Source -> BridgeRole.Sink
+            BridgeRole.Sink -> BridgeRole.Source
         }
+        val topic = when (targetRole) {
+            BridgeRole.Sink -> ntfySettings.senderToReceiverTopic
+            BridgeRole.Source -> ntfySettings.receiverToSenderTopic
+        }
+        val envelopeText = RelayEnvelopeCodec(
+            pairId = ntfySettings.pairId,
+            pairSecret = ntfySettings.pairSecret,
+            localDeviceId = settings.deviceId,
+            localRole = settings.role
+        ).encode(
+            message = BridgeMessage(type = BridgeMessageType.Ping),
+            targetRole = targetRole
+        )
         val connection = (URL("$baseUrl/$topic").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 10_000
@@ -530,13 +546,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             setRequestProperty("Content-Type", "text/plain; charset=utf-8")
         }
         connection.outputStream.use { output ->
-            output.write("axon ntfy settings test".toByteArray())
+            output.write(envelopeText.toByteArray(Charsets.UTF_8))
         }
         val responseCode = connection.responseCode
         connection.disconnect()
         if (responseCode !in 200..299) {
             error("HTTP $responseCode")
         }
+        DiagnosticsLog.add("ntfy ping sent to ${targetRole.displayLabel()}")
     }
 
     private fun isNotificationListenerEnabled(): Boolean {

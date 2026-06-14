@@ -10,7 +10,6 @@ import com.axon.bridge.domain.NtfySettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -18,10 +17,14 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.Call
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.TimeUnit
 
 class NtfyBridgeTransport(
     private val scope: CoroutineScope,
@@ -35,7 +38,9 @@ class NtfyBridgeTransport(
     private val onMediaUpdateReceived: (MediaPayload) -> Unit,
     private val onMediaCommandReceived: (com.axon.bridge.domain.MediaCommandPayload) -> Unit,
     private val onMediaCleared: () -> Unit,
-    private val onCallCommandReceived: (com.axon.bridge.domain.CallCommandPayload) -> Unit
+    private val onCallCommandReceived: (com.axon.bridge.domain.CallCommandPayload) -> Unit,
+    private val onPingReceived: () -> Unit = {},
+    private val onPongReceived: () -> Unit = {}
 ) : BridgeTransport {
     private val relayEnvelopeCodec = RelayEnvelopeCodec(
         pairId = ntfySettings.pairId,
@@ -50,8 +55,12 @@ class NtfyBridgeTransport(
     private val pendingMessages = ArrayDeque<NtfyPendingMessage>()
     private val jobs = mutableListOf<Job>()
     private val flushMutex = Mutex()
+    private val subscribeClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .build()
     @Volatile
-    private var activeSubscription: HttpURLConnection? = null
+    private var activeSubscription: Call? = null
     @Volatile
     private var hasSubscribedOnce = false
     @Volatile
@@ -62,6 +71,7 @@ class NtfyBridgeTransport(
         if (!validateSettings()) return
         restorePendingMessages()
         DiagnosticsLog.add("ntfy Receiver subscribing to ${ntfySettings.senderToReceiverTopic}")
+        DiagnosticsLog.add("ntfy Receiver publishing to ${ntfySettings.receiverToSenderTopic}")
         onStateChanged(BridgeConnectionState.Connecting, "Connecting to ntfy relay")
         jobs += scope.launch {
             subscribeLoop(topic = ntfySettings.senderToReceiverTopic)
@@ -105,12 +115,14 @@ class NtfyBridgeTransport(
         if (!validateSettings()) return
         restorePendingMessages()
         DiagnosticsLog.add("ntfy Sender ready for ${ntfySettings.senderToReceiverTopic}")
+        DiagnosticsLog.add("ntfy Sender subscribing to ${ntfySettings.receiverToSenderTopic}")
         onStateChanged(BridgeConnectionState.Connecting, "Connecting to ntfy relay")
         jobs += scope.launch {
             subscribeLoop(topic = ntfySettings.receiverToSenderTopic)
         }
         jobs += scope.launch {
             NotificationEventBus.events.collect { payload ->
+                DiagnosticsLog.add("ntfy queued ${payload.category.name}")
                 enqueue(
                     BridgeMessage(
                         type = BridgeMessageType.NotificationEvent,
@@ -154,7 +166,7 @@ class NtfyBridgeTransport(
         val activeJobs = jobs.toList()
         jobs.clear()
         activeJobs.forEach { job -> job.cancel() }
-        activeSubscription?.disconnect()
+        activeSubscription?.cancel()
         activeSubscription = null
     }
 
@@ -281,7 +293,7 @@ class NtfyBridgeTransport(
                 } else {
                     onStateChanged(BridgeConnectionState.Connecting, "Subscribing to ntfy")
                 }
-                subscribe(topic)
+                subscribeStream(topic)
                 backoffMs = 2_000L
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -314,34 +326,47 @@ class NtfyBridgeTransport(
         }
     }
 
-    private fun subscribe(topic: String) {
-        val subscriptionPath = if (hasSubscribedOnce) {
+    private fun subscribeStream(topic: String) {
+        val path = if (hasSubscribedOnce) {
             "$topic/json"
         } else {
             "$topic/json?since=$STARTUP_RECOVERY_SINCE"
         }
-        val connection = openConnection(subscriptionPath).apply {
-            requestMethod = "GET"
-            readTimeout = 0
-        }
-        activeSubscription = connection
-        val responseCode = connection.responseCode
-        if (responseCode !in 200..299) {
-            connection.disconnect()
-            throw NtfyHttpException(responseCode)
-        }
-        DiagnosticsLog.add("ntfy subscription connected")
-        onStateChanged(BridgeConnectionState.Connected, "ntfy relay subscribed")
-        hasSubscribedOnce = true
-        BufferedReader(InputStreamReader(connection.inputStream)).use { reader ->
-            while (true) {
-                val line = reader.readLine() ?: break
-                handleNtfyLine(line)
+        val request = Request.Builder()
+            .url(ntfyUrl(path))
+            .apply {
+                basicAuthHeader()?.let { authHeader ->
+                    addHeader("Authorization", authHeader)
+                }
+            }
+            .build()
+        val call = subscribeClient.newCall(request)
+        activeSubscription = call
+        try {
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw NtfyHttpException(response.code)
+                }
+                val stream = response.body?.byteStream()
+                    ?: throw IllegalStateException("empty ntfy stream body")
+                DiagnosticsLog.add("ntfy stream connected")
+                onStateChanged(BridgeConnectionState.Connected, "ntfy stream subscribed")
+                hasSubscribedOnce = true
+                BufferedReader(InputStreamReader(stream)).use { reader ->
+                    while (scope.isActive) {
+                        val line = reader.readLine() ?: break
+                        if (line.isNotBlank()) {
+                            handleNtfyLine(line)
+                        }
+                    }
+                }
+            }
+        } finally {
+            if (activeSubscription == call) {
+                activeSubscription = null
             }
         }
-        connection.disconnect()
-        activeSubscription = null
-        DiagnosticsLog.add("ntfy subscription disconnected")
+        DiagnosticsLog.add("ntfy stream disconnected")
         onStateChanged(BridgeConnectionState.Disconnected, null)
     }
 
@@ -375,10 +400,17 @@ class NtfyBridgeTransport(
             DiagnosticsLog.add("ntfy message ignored: empty payload")
             return
         }
+        DiagnosticsLog.add(
+            "ntfy message seen on ${event.topic.orEmpty().ifBlank { "topic" }}: ${messageText.length} chars"
+        )
         when (val result = relayEnvelopeCodec.decode(messageText)) {
             is RelayEnvelopeDecodeResult.Accepted -> handleBridgeMessage(result.message)
-            is RelayEnvelopeDecodeResult.Ignored -> Unit
-            is RelayEnvelopeDecodeResult.Malformed -> Unit
+            is RelayEnvelopeDecodeResult.Ignored -> {
+                DiagnosticsLog.add("ntfy relay ignored: ${result.reason}")
+            }
+            is RelayEnvelopeDecodeResult.Malformed -> {
+                DiagnosticsLog.add("ntfy relay malformed: ${result.reason}")
+            }
         }
     }
 
@@ -416,6 +448,30 @@ class NtfyBridgeTransport(
                     onCallCommandReceived(command)
                     onEventTransferred()
                 }
+            }
+            BridgeMessageType.Ping -> {
+                DiagnosticsLog.add("ntfy ping received")
+                onPingReceived()
+                enqueue(
+                    message = BridgeMessage(type = BridgeMessageType.Ack),
+                    topic = when (localRole) {
+                        BridgeRole.Source -> ntfySettings.senderToReceiverTopic
+                        BridgeRole.Sink -> ntfySettings.receiverToSenderTopic
+                    },
+                    targetRole = when (localRole) {
+                        BridgeRole.Source -> BridgeRole.Sink
+                        BridgeRole.Sink -> BridgeRole.Source
+                    }
+                )
+                scope.launch {
+                    flushPending()
+                }
+                onEventTransferred()
+            }
+            BridgeMessageType.Ack -> {
+                DiagnosticsLog.add("ntfy pong received")
+                onPongReceived()
+                onEventTransferred()
             }
             else -> {
                 DiagnosticsLog.add("ntfy message ignored: ${message.type.name}")
@@ -466,13 +522,16 @@ class NtfyBridgeTransport(
     }
 
     private fun openConnection(path: String): HttpURLConnection {
-        val url = "${ntfySettings.serverUrl.trim().trimEnd('/')}/${path.trimStart('/')}"
-        return (URL(url).openConnection() as HttpURLConnection).apply {
+        return (URL(ntfyUrl(path)).openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000
             basicAuthHeader()?.let { authHeader ->
                 setRequestProperty("Authorization", authHeader)
             }
         }
+    }
+
+    private fun ntfyUrl(path: String): String {
+        return "${ntfySettings.serverUrl.trim().trimEnd('/')}/${path.trimStart('/')}"
     }
 
     private fun basicAuthHeader(): String? {

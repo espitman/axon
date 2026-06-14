@@ -151,6 +151,18 @@ class BridgeService : Service() {
                 },
                 onCallCommandReceived = { command ->
                     handleCallCommand(command)
+                },
+                onPingReceived = {
+                    mirroredNotificationManager.showBridgeTest(
+                        title = "Axon ping received",
+                        message = "Encrypted ntfy ping reached this phone."
+                    )
+                },
+                onPongReceived = {
+                    mirroredNotificationManager.showBridgeTest(
+                        title = "Axon pong received",
+                        message = "Encrypted ntfy ping/pong completed successfully."
+                    )
                 }
             )
         }

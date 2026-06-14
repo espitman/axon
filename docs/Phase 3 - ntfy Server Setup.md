@@ -348,10 +348,10 @@ Publish topic: axon-p1-test-to-sender
 - If only one auth field is filled, Axon treats the settings as invalid.
 - Later, access tokens are preferred over raw account passwords when auth is enabled.
 - Axon relay payloads are encrypted with an app-level pair secret before publish.
-- Use `json?poll=1` only for manual tests and cached-message checks.
-- The app should use a live subscription endpoint, either:
-  - `https://axon-ntfy.liara.run/<topic>/json`
-  - `wss://axon-ntfy.liara.run/<topic>/ws`
+- Axon publishes with HTTPS `POST /<topic>`.
+- Axon subscribes with a long-lived OkHttp `GET /<topic>/json` stream and reads newline-delimited ntfy events.
+- Use `json?poll=1` only for manual curl tests and one-shot reachability checks, not for app message delivery.
+- Axon does not use ntfy WebSocket subscription in the Android app.
 - Add message IDs and deduplication in Axon's own relay envelope.
 - Do not send full artwork payloads in the first ntfy milestone. ntfy text payload limits are much tighter than the current LAN WebSocket path.
 - Do not log passwords, tokens, SMS bodies, or call details in verbose diagnostics.
@@ -401,7 +401,7 @@ Before using this with real personal data for more than local testing:
 ### Payload Too Large
 
 - ntfy mode should carry compact encrypted text payloads.
-- Axon omits large media artwork over ntfy.
+- Axon compacts artwork into the encrypted ntfy payload when possible and omits it only when it still exceeds the safe payload limit.
 - If metadata stops too, check diagnostics for publish failures or payload-size messages.
 
 ### Commands Do Not Return To Sender

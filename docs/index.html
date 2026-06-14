@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Axon is a private Android-to-Android LAN bridge for SMS, calls, media controls, and watch mirroring."
+      content="Axon mirrors Android SMS, calls, and media controls between two phones over local Wi-Fi or a self-hosted ntfy relay."
     />
-    <title>Axon - Local Android Bridge</title>
+    <title>Axon - Android Bridge</title>
     <link rel="stylesheet" href="./assets/styles.css" />
   </head>
   <body>
@@ -16,14 +16,14 @@
         <span class="brand-mark" aria-hidden="true"></span>
         <span>
           <strong>Axon</strong>
-          <small>Local Android Bridge</small>
+          <small>Android Bridge</small>
         </span>
       </a>
       <nav aria-label="Primary navigation">
         <a href="#features">Features</a>
+        <a href="#transport">Transport</a>
         <a href="#setup">Setup</a>
         <a href="#permissions">Permissions</a>
-        <a href="#roadmap">Roadmap</a>
         <a href="#limits">Limits</a>
       </nav>
     </header>
@@ -31,12 +31,12 @@
     <main id="top">
       <section class="hero">
         <div class="hero-copy">
-          <p class="eyebrow">Private LAN bridge for your own devices</p>
-          <h1>Mirror Android SMS, calls, and media controls without a cloud relay.</h1>
+          <p class="eyebrow">Private bridge for your own Android devices</p>
+          <h1>Mirror Android SMS, calls, and media controls over local Wi-Fi or your own ntfy relay.</h1>
           <p class="lede">
-            Axon connects a Sender phone and a Receiver phone over your local network. The Receiver
-            shows mirrored alerts, keeps a local inbox, and exposes notifications and media controls
-            to a connected watch through Android's normal system pipeline.
+            Axon connects a Sender phone and a Receiver phone. The Receiver shows mirrored alerts,
+            keeps a local inbox and call log, and exposes notifications and media controls to a
+            connected watch through Android's normal system pipeline.
           </p>
           <div class="hero-actions">
             <a class="button primary" href="https://github.com/espitman/axon/releases">Get APK</a>
@@ -58,70 +58,73 @@
           <div class="device receiver">
             <span class="node-label">Receiver</span>
             <strong>Inbox, Alerts, Watch</strong>
-            <small>Local WebSocket server</small>
+            <small>LAN or ntfy transport</small>
           </div>
         </div>
       </section>
 
       <section class="notice">
         <strong>Current status:</strong>
-        Axon is built for private, trusted-network use. Pairing, encryption, and multi-user hardening
-        are intentionally not part of the current release.
+        Axon is experimental. LAN mode is for trusted local networks. ntfy mode encrypts Axon
+        payloads with a shared pair secret, but your relay still sees metadata such as topic names,
+        timing, message sizes, and account activity. Use a self-hosted ntfy server with authentication
+        and deny-by-default access control for real personal data.
       </section>
 
       <section id="features" class="section">
         <div class="section-heading">
           <p class="eyebrow">What it does</p>
-          <h2>One bridge, two roles.</h2>
+          <h2>One app, two roles.</h2>
         </div>
         <div class="grid three">
           <article class="card">
             <h3>SMS mirror and inbox</h3>
             <p>
               Sender captures SMS events directly and resolves contact names when allowed. Receiver
-              stores messages in a local thread-based inbox with unread badges and Persian-friendly text rendering.
+              stores messages in a local thread-based inbox with unread badges, conversation view,
+              and long-press deletion.
             </p>
           </article>
           <article class="card">
             <h3>Call mirroring</h3>
             <p>
               Incoming and ongoing call state is mirrored to Receiver. Receiver can show a full-screen
-              call alert, keep a call log, and send an experimental reject command back to Sender.
+              call alert, keep a call log, delete call entries, and send an experimental reject command
+              back to Sender.
             </p>
           </article>
           <article class="card">
             <h3>Media and watch controls</h3>
             <p>
-              Sender streams active media metadata and artwork. Receiver creates a shadow media session
-              so phone, notification, and watch controls can route commands back to Sender.
+              Sender streams active media metadata. Receiver creates a shadow media session so phone,
+              notification, and watch controls can route commands back to Sender.
             </p>
           </article>
         </div>
       </section>
 
-      <section class="section split">
+      <section id="transport" class="section split">
         <div>
-          <p class="eyebrow">Architecture</p>
-          <h2>Local by design.</h2>
+          <p class="eyebrow">Transport</p>
+          <h2>Choose direct LAN or self-hosted relay.</h2>
           <p>
-            Axon uses Ktor WebSockets over LAN. Receiver hosts the bridge on port <code>8080</code>;
-            Sender discovers or connects to it and sends structured JSON events. There is no Axon server.
+            LAN mode uses a direct Ktor WebSocket bridge. ntfy mode uses two authenticated topics on
+            a self-hosted ntfy server and encrypts Axon payloads in the app before publishing.
           </p>
         </div>
         <pre class="diagram" aria-label="Technical flow"><code>Sender Android phone
-  SMS / Call / Media source
+  SMS / Call / Media sources
         |
         v
-  Ktor WebSocket client
+  Axon transport
         |
-     LAN Wi-Fi
-        |
-        v
-  Ktor WebSocket server
+   LAN WebSocket
+        or
+   HTTPS ntfy relay
         |
         v
 Receiver notifications
-Inbox, call screen, watch bridge</code></pre>
+Inbox, call log, media session, watch bridge</code></pre>
       </section>
 
       <section id="setup" class="section">
@@ -142,14 +145,18 @@ Inbox, call screen, watch bridge</code></pre>
           </article>
           <article>
             <span>3</span>
-            <h3>Connect locally</h3>
-            <p>Use network scan or manual IP entry. Both phones must be on the same trusted LAN or hotspot network.</p>
+            <h3>Choose transport</h3>
+            <p>Use LAN scan/manual IP on the same network, or configure a self-hosted ntfy server with matching pair ID and pair secret.</p>
           </article>
           <article>
             <span>4</span>
             <h3>Allow watch alerts</h3>
             <p>In your watch companion app, allow notifications from Axon. Watch controls use Android's normal notification and media-session paths.</p>
           </article>
+        </div>
+        <div class="doc-links">
+          <a class="button secondary" href="./Phase%203%20-%20ntfy%20Server%20Setup.md">Self-hosted ntfy guide</a>
+          <a class="button secondary" href="./Phase%203%20-%20ntfy%20Relay%20Migration%20Todo.md">Phase 3 checklist</a>
         </div>
       </section>
 
@@ -170,42 +177,24 @@ Inbox, call screen, watch bridge</code></pre>
         </div>
       </section>
 
-      <section id="roadmap" class="section split">
-        <div>
-          <p class="eyebrow">Roadmap</p>
-          <h2>Phase 3 explores a self-hosted relay.</h2>
-          <p>
-            The next planned phase keeps the current LAN bridge intact while adding an optional
-            ntfy transport for Sender and Receiver devices that are not on the same local network.
-          </p>
-        </div>
-        <div class="card list-card">
-          <h3>Phase 3 planning</h3>
-          <ul>
-            <li>Transport mode foundation.</li>
-            <li>Self-hosted ntfy settings and topics.</li>
-            <li>Bidirectional SMS, call, media, and command relay.</li>
-          </ul>
-          <a class="button secondary" href="./Phase%203%20-%20ntfy%20Relay%20Migration%20Todo.md">Open todo list</a>
-        </div>
-      </section>
-
       <section id="limits" class="section split">
         <div>
           <p class="eyebrow">Security and limits</p>
-          <h2>Use Axon on networks you trust.</h2>
+          <h2>Useful, private, still experimental.</h2>
           <p>
-            The current release intentionally prioritizes local utility over security. It does not
-            yet implement pairing, encryption, identity verification, or revocation. Use it only on
-            trusted private networks.
+            ntfy relay payloads are encrypted with the Axon pair secret, but this is not the same as
+            a hardened public messaging product. Server ACLs, strong credentials, private pair secrets,
+            and careful Android permission setup still matter.
           </p>
         </div>
         <div class="card list-card">
           <h3>Known limitations</h3>
           <ul>
+            <li>ntfy server metadata remains visible to the relay operator.</li>
             <li>Full-screen call alerts depend on Android and OEM settings.</li>
             <li>Reject call is experimental and may return false on some devices.</li>
             <li>Watch behavior depends on the phone companion app and its allowlist.</li>
+            <li>Large media artwork may be omitted over ntfy to keep payloads reliable.</li>
             <li>Local archive data stays on the Receiver; it is not a system SMS database.</li>
           </ul>
         </div>
@@ -218,31 +207,46 @@ Inbox, call screen, watch bridge</code></pre>
         </div>
         <div class="grid two">
           <article class="card">
+            <h3>ntfy auth fails</h3>
+            <p>
+              Check the app username/password or token, confirm <code>NTFY_AUTH_FILE</code> is active,
+              keep <code>NTFY_AUTH_DEFAULT_ACCESS=deny-all</code>, and verify each user has the correct
+              read/write ACL for its topic direction.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Wrong pair ID or secret</h3>
+            <p>
+              Both phones must share the same pair ID and pair secret. Wrong pair IDs are ignored;
+              wrong pair secrets fail payload authentication and are ignored.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Server unreachable</h3>
+            <p>
+              Test the base URL with a browser or curl, then check DNS, HTTPS, reverse proxy, firewall,
+              and Android network restrictions. Use reconnect after changing settings.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Commands do not reach Sender</h3>
+            <p>
+              Confirm Receiver can publish to <code>axon-&lt;pairId&gt;-to-sender</code> and Sender can
+              subscribe to it. For media, Sender also needs Notification Access to see the active session.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Payload too large</h3>
+            <p>
+              ntfy mode keeps messages small. Large artwork may be omitted, while media metadata and
+              controls should continue working.
+            </p>
+          </article>
+          <article class="card">
             <h3>Receiver gets SMS but watch does not</h3>
             <p>
               The Axon bridge is working. Open the watch companion app and allow notifications from
               Axon, then check battery restrictions for the companion app.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Network scan finds nothing</h3>
-            <p>
-              Confirm both devices are on the same subnet, disable VPN/proxy, and try manual IP.
-              Sender also retries discovery after Wi-Fi changes while the bridge is active.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Watch media buttons do nothing</h3>
-            <p>
-              Check Receiver diagnostics for the shadow media session and silent playback anchor.
-              Axon uses these so watch controls route into the Receiver media session.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Full-screen call does not appear</h3>
-            <p>
-              On Receiver, allow full-screen call alerts in Android settings and keep the Incoming
-              Calls notification channel at high priority.
             </p>
           </article>
         </div>
@@ -251,7 +255,7 @@ Inbox, call screen, watch bridge</code></pre>
 
     <footer>
       <span class="brand-mark small" aria-hidden="true"></span>
-      <p>Axon is an experimental private Android bridge. Built for local-first control, not cloud sync.</p>
+      <p>Axon is an experimental private Android bridge. Built for local-first control and self-hosted relay use.</p>
       <a href="https://github.com/espitman/axon">github.com/espitman/axon</a>
     </footer>
   </body>

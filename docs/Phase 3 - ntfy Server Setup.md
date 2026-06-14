@@ -35,6 +35,26 @@ Important:
 - `NTFY_AUTH_DEFAULT_ACCESS=deny-all` prevents anonymous read/write access to unknown topics.
 - `/var/lib/ntfy/user.db` should live on persistent storage. If the container filesystem is not persistent, users and ACLs may disappear after redeploy.
 
+## Minimal Setup Checklist
+
+Use this order for a fresh self-hosted relay:
+
+1. Deploy ntfy behind HTTPS.
+2. Set `NTFY_BASE_URL` to the public HTTPS URL.
+3. Set `NTFY_BEHIND_PROXY=true` when a reverse proxy terminates TLS.
+4. Mount persistent storage for `/var/lib/ntfy`.
+5. Set `NTFY_AUTH_FILE=/var/lib/ntfy/user.db`.
+6. Set `NTFY_AUTH_DEFAULT_ACCESS=deny-all`.
+7. Start ntfy once so the auth database can be created.
+8. Create the Sender and Receiver users.
+9. Grant topic-specific ACLs.
+10. Run the authenticated and unauthorized `curl` checks in this document.
+11. Put the same server URL, pair ID, and pair secret into both Axon phones.
+
+If `ntfy user add` says `auth-file does not exist`, start the server once with `NTFY_AUTH_FILE` configured, then run the user command again inside the same configured container/environment.
+
+If `ntfy user add --auth-file=...` fails, do not pass `--auth-file`; this ntfy CLI reads the configured auth file from server configuration or environment.
+
 ## Users
 
 Two regular users are used:
@@ -294,3 +314,47 @@ Before using this with real personal data for more than local testing:
 - Keep the Axon pair secret private and identical on both paired devices.
 - Keep `deny-all` enabled for anonymous/default access.
 - Confirm `/var/lib/ntfy/user.db` is persisted across deploys.
+
+## Troubleshooting
+
+### Auth Failure In Axon
+
+- Confirm the username/password or token is correct for that role.
+- Confirm the running ntfy process has `NTFY_AUTH_FILE=/var/lib/ntfy/user.db`.
+- Confirm the running ntfy process has `NTFY_AUTH_DEFAULT_ACCESS=deny-all`.
+- Confirm `ntfy access` shows read/write permissions for the exact topic names used by Axon.
+
+### Wrong Pair ID
+
+- Axon topic names are derived from topic prefix and pair ID.
+- `p1-test` becomes `axon-p1-test-to-receiver` and `axon-p1-test-to-sender` when the prefix is `axon`.
+- Both phones must use the same pair ID.
+- Do not use dots in pair IDs if they will become topic names.
+
+### Wrong Pair Secret
+
+- The pair secret is not part of ntfy access control.
+- Axon uses it to encrypt and authenticate relay payloads.
+- If the pair secret differs, messages may arrive from ntfy but Axon rejects them during decrypt/authentication.
+- Re-pair or copy the generated secret to both phones.
+
+### Server Unreachable
+
+- Test the base URL in a browser.
+- Test publish/read with the `curl` commands above.
+- Check reverse proxy, DNS, TLS certificate, and firewall settings.
+- Check whether the Android device can reach the public URL on mobile data and Wi-Fi.
+
+### Payload Too Large
+
+- ntfy mode should carry compact encrypted text payloads.
+- Axon omits large media artwork over ntfy.
+- If metadata stops too, check diagnostics for publish failures or payload-size messages.
+
+### Commands Do Not Return To Sender
+
+- Receiver must have write access to `axon-<pairId>-to-sender`.
+- Sender must have read access to `axon-<pairId>-to-sender`.
+- Pair ID and pair secret must match on both phones.
+- Sender must have Notification Access for media-session commands.
+- Sender must have the required call permission and device support for call reject.

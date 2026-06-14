@@ -207,6 +207,17 @@ h3 {
   margin-top: 1.7rem;
 }
 
+.doc-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.2rem;
+}
+
+.doc-links .button {
+  padding: 0 1rem;
+}
+
 .button {
   display: inline-flex;
   min-height: 3rem;

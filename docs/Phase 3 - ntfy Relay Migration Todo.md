@@ -2,11 +2,11 @@
 
 ## Goal
 
-Move Axon from a LAN-only direct bridge to an optional self-hosted ntfy relay transport.
+Move Axon from a direct local-network bridge to an optional self-hosted ntfy relay transport.
 
 The first target is not to remove the current LAN WebSocket bridge. The safer path is to add ntfy as a second transport mode, prove SMS, calls, media, and reverse commands over it, then decide whether LAN should remain as a fallback or become a developer-only mode.
 
-Security was intentionally out of scope for Phase 1 and Phase 2. Phase 3 introduces server-side access control immediately, but app-level end-to-end encryption should be treated as a follow-up hardening milestone.
+Security was intentionally out of scope for Phase 1 and Phase 2. Phase 3 introduces server-side access control and app-level encrypted relay payloads using a shared Axon pair secret.
 
 ## Current Baseline
 
@@ -314,23 +314,27 @@ Implementation files:
 
 ## Milestone 10: Documentation And Public Release Readiness
 
-- [ ] Update README with both LAN and ntfy transport modes.
-- [ ] Update GitHub Pages copy from "without a cloud relay" to "LAN or self-hosted relay".
-- [ ] Add self-hosted ntfy setup guide.
-- [ ] Add privacy warning for non-encrypted relay mode.
-- [ ] Add troubleshooting for:
-  - [ ] auth failure
-  - [ ] wrong pair ID
-  - [ ] server unreachable
-  - [ ] payload too large
-  - [ ] commands not returning to Sender
+- [x] Update README with both LAN and ntfy transport modes.
+- [x] Update GitHub Pages copy from "without a cloud relay" to "LAN or self-hosted relay".
+- [x] Add self-hosted ntfy setup guide.
+- [x] Add relay privacy warning:
+  - [x] Axon payloads are encrypted with the pair secret.
+  - [x] Relay metadata such as topic names, timing, message sizes, client IPs, and account activity remains visible to the ntfy server.
+  - [x] Server-side auth and deny-by-default ACLs are still required.
+- [x] Add troubleshooting for:
+  - [x] auth failure
+  - [x] wrong pair ID
+  - [x] wrong pair secret
+  - [x] server unreachable
+  - [x] payload too large
+  - [x] commands not returning to Sender
 - [ ] Add screenshots after UI is stable.
 
 Verification:
 
-- [ ] A new user can understand which mode to choose.
-- [ ] A technical user can self-host ntfy and pair two phones from the docs.
-- [ ] Public docs do not imply end-to-end security before it exists.
+- [x] A new user can understand which mode to choose.
+- [x] A technical user can self-host ntfy and pair two phones from the docs.
+- [x] Public docs do not imply stronger security than Axon currently provides.
 
 ## First Implementation Slice
 

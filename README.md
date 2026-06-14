@@ -1,242 +1,254 @@
 # Axon
 
-Axon is a private Android-to-Android bridge for keeping a secondary Android phone in sync with important communication events from a primary phone.
+Axon is a private Android-to-Android bridge for mirroring SMS, call state, media metadata, and media controls between two Android phones.
 
-The first production target is a two-device setup:
+Axon has two roles:
 
-- **Sender**: the Android phone that receives the original SMS and call events.
-- **Receiver**: the Android phone that stays connected to the Sender over the local network, shows mirrored alerts, forwards those alerts to the user's watch through the normal Android notification pipeline, and keeps a local SMS inbox.
+- **Sender**: the Android phone that receives the original SMS, call, and media-session events.
+- **Receiver**: the Android phone that shows mirrored alerts, keeps the local inbox and call log, exposes a shadow media session, and mirrors notifications/controls to a connected watch through Android's normal notification and media pipeline.
 
-Phase 1 intentionally optimizes for practical daily use on the user's own devices. Network security, pairing, encryption, and multi-user hardening are explicitly out of scope for now.
+The app now supports two transport modes:
+
+- **Local Wi-Fi / LAN**: direct Ktor WebSocket connection between the two phones.
+- **Self-hosted ntfy relay**: HTTPS relay through a user-controlled ntfy server for devices that are not on the same local network.
+
+Axon is still experimental. It is built for personal devices first, not for broad managed deployments.
 
 ## Product Goal
 
-Axon solves a very specific problem: some notifications and SMS messages arrive on one Android device, but the user wants to see and manage them from another Android device and its connected watch.
+Axon solves a specific personal-device problem: important messages, calls, and media controls may live on one Android phone, while the user wants to see or control them from another Android phone and its paired watch.
 
-The business value is not "another SMS app." Axon is a local device bridge:
+Axon is not a replacement SMS app and it is not a cloud sync service:
 
-- It keeps the original phone as the source of truth.
-- It mirrors important events to a second phone without cloud infrastructure.
-- It lets the second phone behave like a companion inbox and notification relay.
-- It works around OEM-specific background and notification limitations.
-
-The current MVP focuses on reliability for SMS delivery:
-
-1. Sender receives an SMS.
-2. Sender resolves the sender name from Contacts when permission is available.
-3. Sender sends a structured event to Receiver over WebSocket.
-4. Receiver shows a high-priority mirrored notification.
-5. Receiver stores the SMS in a thread-based inbox.
-6. A connected watch can mirror Axon notifications from the Receiver through the phone's normal notification pipeline or companion app.
+- The Sender remains the source of truth.
+- The Receiver behaves like a companion inbox, call surface, notification relay, and media controller.
+- Watch support comes from normal Android notifications and media sessions.
+- Transport can be direct LAN or a self-hosted ntfy relay.
 
 ## Current Feature Set
 
-### Bridge Modes
+### SMS Mirror And Inbox
 
-Axon has two runtime roles:
+On Sender:
 
-- **Sender**
-  - Connects to the Receiver IP.
-  - Captures SMS events directly through `SMS_RECEIVED`.
-  - Also includes a `NotificationListenerService` path for notification-based mirroring.
-  - Resolves contact names through `ContactsContract.PhoneLookup` when `READ_CONTACTS` is granted.
-  - Publishes events into the WebSocket transport.
+- Captures SMS directly through `SMS_RECEIVED`.
+- Can use `NotificationListenerService` as an additional notification capture path.
+- Resolves contact names through `ContactsContract.PhoneLookup` when `READ_CONTACTS` is granted.
 
-- **Receiver**
-  - Hosts a local WebSocket server on port `8080`.
-  - Receives notification payloads.
-  - Displays mirrored notifications using Android `NotificationManager`.
-  - Stores received SMS messages in a local thread-based inbox.
+On Receiver:
 
-### SMS Inbox
+- Shows mirrored SMS notifications.
+- Stores mirrored SMS in a thread-based local inbox.
+- Supports unread badges, conversation view, and Persian-friendly text rendering with Vazirmatn.
+- Supports long-press selection and deletion for individual messages and entire threads.
 
-The Receiver includes an in-app SMS archive:
+The Receiver archive is local to Axon. It does not read or modify the Receiver's system SMS database.
 
-- Thread list grouped by sender name or phone number.
-- Last message preview.
-- Received time.
-- Unread badge.
-- Conversation screen per sender.
-- Persistent local storage.
-- Persian-friendly message rendering with Vazirmatn.
+### Call Mirroring
 
-The archive is currently local to the Receiver and stores mirrored SMS messages only. It does not read the Receiver's system SMS database.
+Axon mirrors call state from Sender to Receiver:
+
+- Incoming, ongoing, and ended call state.
+- Receiver notifications and in-app call surface.
+- Receiver call log.
+- Long-press selection and deletion for call log items.
+- Experimental reject command from Receiver back to Sender.
+
+Reject support depends on Android version, device policy, default dialer restrictions, and permissions. It may fail on some devices even when the bridge itself is working.
+
+### Media And Watch Controls
+
+Sender tracks active media sessions and sends metadata to Receiver:
+
+- Track title, artist, album, playback state, and supported actions.
+- Artwork over LAN.
+- Artwork over ntfy only when the encrypted relay payload is small enough; large artwork is omitted to keep relay messages reliable.
+
+Receiver creates a shadow media session so media controls can flow back to Sender:
+
+- Receiver phone controls.
+- Notification controls.
+- Watch controls, when the watch companion app routes media buttons through the Receiver phone.
 
 ### Watch Support
 
-Axon does not talk directly to watches. Instead, the Receiver creates normal Android notifications and the watch companion app or system notification bridge mirrors them.
+Axon does not talk directly to watches. The Receiver creates normal Android notifications and media sessions. A watch companion app or Android system bridge mirrors those to the watch.
 
-For companion-app-based watches, the companion app must be configured to allow notifications from **Axon**. From the watch's point of view, mirrored SMS messages are Axon notifications, not Messages/SMS app notifications.
+For companion-app-based watches:
 
-### Diagnostics
+- Allow notifications from **Axon** in the companion app.
+- Make sure the companion app has notification access when required.
+- Disable aggressive battery restrictions for Axon and the companion app if alerts are delayed.
 
-The Settings screen includes a diagnostics panel:
+## Transport Modes
 
-- Fixed-height log box.
-- Last 10 entries visible.
-- Scrollable log.
-- Clear button.
-- Ping button for testing Sender/Receiver connectivity.
+### Local Wi-Fi / LAN
 
-Diagnostics help identify whether a problem is in SMS capture, contact lookup, WebSocket transport, Receiver notification display, or watch mirroring.
-
-## Technical Architecture
-
-The app is a single Android application that can run in either Sender or Receiver mode.
+LAN mode is the simplest path when both phones are on the same trusted network or hotspot.
 
 ```text
 Sender phone
-  SMS BroadcastReceiver / NotificationListenerService
-          |
-          v
-  NotificationEventBus
+  SMS / Call / Media sources
           |
           v
   Ktor WebSocket client
           |
-       LAN Wi-Fi
+       Local Wi-Fi
           |
           v
-  Ktor WebSocket server
+  Ktor WebSocket server on Receiver :8080
           |
           v
-Receiver phone
-  NotificationManager + SMS archive + Compose UI
+Receiver notifications, inbox, call log, media session
 ```
 
-### Layers
+LAN mode supports:
 
-- `domain`
-  - Bridge roles and state.
-  - WebSocket protocol models.
-  - SMS archive models.
-
-- `data`
-  - Settings persistence.
-  - Ktor WebSocket transport.
-  - Network/device info helpers.
-  - Diagnostics log.
-  - In-memory event bus.
-  - SMS archive persistence.
-
-- `service`
-  - Foreground bridge service.
-  - Notification listener.
-  - SMS broadcast receiver.
-  - Mirrored notification manager.
-
-- `presentation`
-  - `HomeViewModel`.
-  - Device role, permissions, diagnostics, inbox state.
-
-- `MainActivity.kt`
-  - Jetpack Compose UI.
-  - Home, Settings, Inbox, and thread screens.
-  - Page transitions.
-  - Runtime permission requests.
-
-## Transport Protocol
-
-Axon uses Ktor WebSockets and kotlinx.serialization JSON.
-
-Default endpoint:
+- Receiver discovery on the local subnet.
+- Manual Receiver IP entry.
+- Direct WebSocket endpoint:
 
 ```text
 ws://<receiver-ip>:8080/bridge
 ```
 
-Important message types:
+Use LAN mode only on networks you trust.
 
-```json
-{
-  "type": "HELLO",
-  "hello": {
-    "role": "Source",
-    "deviceName": "Sender device",
-    "appVersion": "0.1.0"
-  }
-}
+### Self-Hosted ntfy Relay
+
+ntfy mode is for cases where the two phones are not on the same Wi-Fi network.
+
+Axon uses two ntfy topics per pair:
+
+```text
+axon-<pairId>-to-receiver
+axon-<pairId>-to-sender
 ```
 
-```json
-{
-  "type": "NOTIFICATION_EVENT",
-  "payload": {
-    "id": "stable-id",
-    "category": "SMS",
-    "originDevice": "Sender device",
-    "title": "Sender name or number",
-    "message": "SMS body",
-    "packageName": "android.provider.Telephony.SMS_RECEIVED",
-    "postedTime": 1710000000000
-  }
-}
+Direction:
+
+- Sender publishes SMS, call, and media events to `to-receiver`.
+- Receiver subscribes to `to-receiver`.
+- Receiver publishes media and call commands to `to-sender`.
+- Sender subscribes to `to-sender`.
+
+Required app settings on both devices:
+
+- Server URL, for example `https://axon-ntfy.example.com`.
+- Pair ID.
+- Pair secret.
+- Username.
+- Password or token credential.
+- Topic prefix, default `axon`.
+
+The pair ID and pair secret must match on both phones.
+
+Relay payloads are encrypted in the app before publishing to ntfy:
+
+- AES-GCM encryption.
+- Key derived from the shared pair secret.
+- Message authentication rejects tampered payloads.
+- Unpairing rotates the pair ID and clears the old pair secret.
+
+The ntfy server still sees topic names, timestamps, message sizes, client IPs, and account activity. Run ntfy with authentication and deny-by-default access control. Do not use a public anonymous ntfy topic for real Axon traffic.
+
+Self-hosting guide:
+
+- [Phase 3 - ntfy Server Setup](./docs/Phase%203%20-%20ntfy%20Server%20Setup.md)
+- [Phase 3 - ntfy Relay Migration Todo](./docs/Phase%203%20-%20ntfy%20Relay%20Migration%20Todo.md)
+
+## Technical Architecture
+
+The app is a single Android application that can run as Sender or Receiver.
+
+Main layers:
+
+- `domain`
+  - Bridge roles, models, and protocol types.
+- `data`
+  - Settings persistence.
+  - LAN and ntfy transport implementations.
+  - Relay envelope codec and encryption.
+  - Retry queue and diagnostics.
+  - SMS and call archive persistence.
+- `service`
+  - Foreground bridge service.
+  - Notification listener.
+  - SMS broadcast receiver.
+  - Call state monitoring.
+  - Media session tracking.
+  - Mirrored notification manager.
+- `presentation`
+  - `HomeViewModel`.
+  - Role, transport, permissions, diagnostics, inbox, calls, and media state.
+- `MainActivity.kt`
+  - Jetpack Compose UI.
+  - Home, Settings, Messages, Thread, Calls, and page transitions.
+
+## Protocol Notes
+
+LAN mode sends `BridgeMessage` JSON over WebSocket.
+
+ntfy mode wraps `BridgeMessage` in an Axon relay envelope, encrypts the bridge payload, and publishes the encrypted envelope text to ntfy.
+
+Important bridge message types:
+
+```text
+HELLO
+PING
+ACK
+NOTIFICATION_EVENT
+MEDIA_UPDATE
+MEDIA_CLEAR
+MEDIA_COMMAND
+CALL_COMMAND
 ```
 
-```json
-{
-  "type": "PING"
-}
-```
+The ntfy relay envelope includes:
 
-The Sender reconnects with exponential backoff. Both sides support ping/ack diagnostics.
+- Message ID.
+- Pair ID.
+- Source device ID.
+- Target role.
+- Created timestamp.
+- Message type.
+- Payload version.
+- Encrypted payload.
+
+The receiver side ignores duplicate messages, local echo messages, wrong pair IDs, wrong target roles, malformed payloads, and payloads that fail authentication.
 
 ## Android Permissions
 
 Axon uses permissions according to role and feature:
 
 - `INTERNET`
-  - WebSocket client/server.
-
+  - LAN WebSocket and ntfy HTTPS transport.
 - `ACCESS_NETWORK_STATE`
-  - Local IP and network state display.
-
+  - Local IP, network state display, and Wi-Fi change handling.
 - `FOREGROUND_SERVICE`
   - Keeps the bridge active.
-
 - `FOREGROUND_SERVICE_DATA_SYNC`
   - Foreground service type for Android 14+.
-
 - `POST_NOTIFICATIONS`
-  - Receiver needs this to show mirrored notifications.
-
+  - Receiver shows mirrored notifications.
 - `RECEIVE_SMS`
-  - Sender uses this to receive SMS directly through Android's SMS broadcast path.
-
+  - Sender receives SMS directly through Android's SMS broadcast path.
 - `READ_CONTACTS`
-  - Sender uses this to resolve phone numbers to contact names.
-
+  - Sender resolves phone numbers to contact names.
+- `READ_PHONE_STATE`
+  - Sender tracks call state.
+- `READ_CALL_LOG`
+  - Sender can enrich call details when Android provides them.
+- `ANSWER_PHONE_CALLS`
+  - Sender attempts experimental call reject commands.
+- `USE_FULL_SCREEN_INTENT`
+  - Receiver can request full-screen call alerts where Android allows it.
 - `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`
   - Opens the system exemption flow.
-
 - `WAKE_LOCK`
-  - Keeps the bridge alive while running.
+  - Helps keep the bridge alive while running.
 
-Notification Access is not a manifest runtime permission. It is managed through Android settings and is used by `AxonNotificationListenerService`.
-
-## OEM Background Notes
-
-For Sender mode on some Android OEM builds, Android permissions are often not enough. The user may also need to configure:
-
-- Auto-start enabled.
-- Battery set to "No restrictions."
-- Axon locked in recents.
-- Notification access enabled when using notification-listener capture.
-- SMS and Contacts permissions allowed.
-
-The SMS broadcast path was added because some OEM setups do not reliably expose SMS notifications through `NotificationListenerService`.
-
-## Receiver / Watch Notes
-
-Receiver notifications are normal Android notifications created by Axon. For watches that depend on a phone companion app:
-
-- Open the watch companion app.
-- Enable App Alerts.
-- Allow notifications from Axon.
-- Make sure the companion app has notification access.
-- Disable aggressive battery restrictions for the companion app if notifications are delayed.
-
-If SMS reaches the Receiver phone but not the watch, the bridge is working and the remaining issue is usually the watch companion app's notification allowlist.
+Notification Access is managed through Android settings and is used by `AxonNotificationListenerService`.
 
 ## Build And Run
 
@@ -250,6 +262,12 @@ Debug build:
 
 ```bash
 ./gradlew :app:assembleDebug
+```
+
+Run helper:
+
+```bash
+./scripts/android_run.sh
 ```
 
 Release build:
@@ -270,44 +288,62 @@ Install with adb:
 adb install -r /Users/espitman/Desktop/axon-release.apk
 ```
 
-Run helper:
+## Troubleshooting
 
-```bash
-./scripts/android_run.sh
-```
+### LAN Scan Finds Nothing
+
+- Confirm both phones are on the same Wi-Fi, hotspot, or subnet.
+- Disable VPN, proxy, or private DNS features that isolate local traffic.
+- Try manual Receiver IP entry.
+- Confirm Receiver bridge service is running.
+
+### ntfy Auth Failure
+
+- Confirm the app username and password/token match the ntfy user.
+- Confirm the server is running with `NTFY_AUTH_FILE`.
+- Confirm `NTFY_AUTH_DEFAULT_ACCESS=deny-all`.
+- Confirm topic ACLs allow the correct direction for each user.
+
+### Wrong Pair ID Or Pair Secret
+
+- Both phones must use the same pair ID and pair secret.
+- If one phone was unpaired, copy the new pair identity to the other phone.
+- Wrong pair ID messages are ignored.
+- Wrong pair secret messages fail authentication and are ignored.
+
+### ntfy Server Unreachable
+
+- Open the server URL in a browser or test it with `curl`.
+- Check HTTPS and reverse-proxy configuration.
+- Check DNS and firewall rules.
+- Use diagnostics and reconnect after changing settings.
+
+### Payload Too Large
+
+- ntfy mode keeps relay messages small.
+- Large media artwork may be omitted.
+- Metadata and controls should continue working even when artwork is not sent.
+
+### Commands Do Not Return To Sender
+
+- Check that Receiver can publish to `axon-<pairId>-to-sender`.
+- Check that Sender can subscribe to `axon-<pairId>-to-sender`.
+- Confirm both phones have the same pair ID and pair secret.
+- For media, confirm Sender has Notification Access and can see the active media session.
+- For call reject, confirm `ANSWER_PHONE_CALLS` is granted and the device permits the action.
 
 ## Current Limitations
 
-- No encryption or authentication yet.
-- Designed for trusted LAN use.
-- Manual Receiver IP entry.
-- SMS archive is local to the Receiver only.
-- No reply support.
-- No message deletion UI yet.
-- No search yet.
-- No cloud sync.
-- Call mirroring exists through notification filtering but SMS is currently the more tested path.
-
-## Roadmap
-
-### Phase 1
-
-- Stable Sender/Receiver bridge.
-- SMS mirroring.
-- Contact name resolution.
-- Receiver notification display.
-- Watch mirroring through the Receiver's notification pipeline.
-- Thread-based Receiver inbox.
-- Diagnostics and ping/pong tooling.
-
-### Phase 2
-
-Planned media integration:
-
-- Source media session tracking.
-- Receiver-side shadow media session.
-- Watch media controls.
-- Back-channel commands from Receiver/watch to Sender.
+- Axon is experimental and side-load oriented.
+- ntfy mode requires a correctly configured self-hosted server for real personal data.
+- ntfy payloads are encrypted, but relay metadata such as topics, timing, and message sizes remain visible to the server.
+- ntfy credentials and pair secrets are stored locally on the device.
+- Full-screen call alerts depend on Android and OEM settings.
+- Reject call is experimental and may fail on some devices.
+- Watch behavior depends on the phone companion app and its allowlist.
+- Local archive data stays inside Axon on the Receiver.
+- No SMS reply support yet.
+- No inbox search yet.
 
 ## Repository Notes
 

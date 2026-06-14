@@ -163,8 +163,8 @@ class NtfyBridgeTransport(
                 "ntfy server URL is invalid"
             ntfySettings.pairId.isBlank() -> "ntfy pair ID is required"
             ntfySettings.pairSecret.isBlank() -> "ntfy pair secret is required"
-            ntfySettings.username.isBlank() -> "ntfy username is required"
-            ntfySettings.password.isBlank() -> "ntfy password or token is required"
+            ntfySettings.username.isBlank() != ntfySettings.password.isBlank() ->
+                "ntfy auth requires both username and password, or neither"
             else -> null
         }
         if (error != null) {
@@ -425,11 +425,14 @@ class NtfyBridgeTransport(
         val url = "${ntfySettings.serverUrl.trim().trimEnd('/')}/${path.trimStart('/')}"
         return (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000
-            setRequestProperty("Authorization", basicAuthHeader())
+            basicAuthHeader()?.let { authHeader ->
+                setRequestProperty("Authorization", authHeader)
+            }
         }
     }
 
-    private fun basicAuthHeader(): String {
+    private fun basicAuthHeader(): String? {
+        if (ntfySettings.username.isBlank() && ntfySettings.password.isBlank()) return null
         val credentials = "${ntfySettings.username}:${ntfySettings.password}"
         val encoded = Base64.encodeToString(credentials.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
         return "Basic $encoded"

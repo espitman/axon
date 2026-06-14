@@ -67,8 +67,9 @@
         <strong>Current status:</strong>
         Axon is experimental. LAN mode is for trusted local networks. ntfy mode encrypts Axon
         payloads with a shared pair secret, but your relay still sees metadata such as topic names,
-        timing, message sizes, and account activity. Use a self-hosted ntfy server with authentication
-        and deny-by-default access control for real personal data.
+        timing, message sizes, and account activity. A personal ntfy server can run without ntfy
+        authentication; authentication and deny-by-default ACLs are recommended for shared or public
+        relay servers.
       </section>
 
       <section id="features" class="section">
@@ -108,8 +109,9 @@
           <p class="eyebrow">Transport</p>
           <h2>Choose direct LAN or self-hosted relay.</h2>
           <p>
-            LAN mode uses a direct Ktor WebSocket bridge. ntfy mode uses two authenticated topics on
-            a self-hosted ntfy server and encrypts Axon payloads in the app before publishing.
+            LAN mode uses a direct Ktor WebSocket bridge. ntfy mode uses two topics on a self-hosted
+            ntfy server and encrypts Axon payloads in the app before publishing. ntfy username/password
+            is optional for personal servers.
           </p>
         </div>
         <pre class="diagram" aria-label="Technical flow"><code>Sender Android phone
@@ -183,8 +185,8 @@ Inbox, call log, media session, watch bridge</code></pre>
           <h2>Useful, private, still experimental.</h2>
           <p>
             ntfy relay payloads are encrypted with the Axon pair secret, but this is not the same as
-            a hardened public messaging product. Server ACLs, strong credentials, private pair secrets,
-            and careful Android permission setup still matter.
+            a hardened public messaging product. Private pair secrets, unguessable topics, optional
+            server ACLs, and careful Android permission setup still matter.
           </p>
         </div>
         <div class="card list-card">
@@ -207,11 +209,10 @@ Inbox, call log, media session, watch bridge</code></pre>
         </div>
         <div class="grid two">
           <article class="card">
-            <h3>ntfy auth fails</h3>
+            <h3>ntfy auth setup</h3>
             <p>
-              Check the app username/password or token, confirm <code>NTFY_AUTH_FILE</code> is active,
-              keep <code>NTFY_AUTH_DEFAULT_ACCESS=deny-all</code>, and verify each user has the correct
-              read/write ACL for its topic direction.
+              For a personal open relay, leave both username and password/token empty. If your relay
+              requires auth, fill both fields and verify each user has the correct read/write ACL.
             </p>
           </article>
           <article class="card">

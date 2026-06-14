@@ -505,11 +505,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (ntfySettings.pairSecret.isBlank()) {
             return "Pair secret is required"
         }
-        if (ntfySettings.username.isBlank()) {
-            return "Username is required"
-        }
-        if (ntfySettings.password.isBlank()) {
-            return "Password or token is required"
+        if (ntfySettings.username.isBlank() != ntfySettings.password.isBlank()) {
+            return "Fill both username and password, or leave both empty"
         }
         return null
     }
@@ -525,9 +522,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             connectTimeout = 10_000
             readTimeout = 10_000
             doOutput = true
-            val credential = "${ntfySettings.username}:${ntfySettings.password}"
-            val encodedCredential = Base64.encodeToString(credential.toByteArray(), Base64.NO_WRAP)
-            setRequestProperty("Authorization", "Basic $encodedCredential")
+            if (ntfySettings.username.isNotBlank() && ntfySettings.password.isNotBlank()) {
+                val credential = "${ntfySettings.username}:${ntfySettings.password}"
+                val encodedCredential = Base64.encodeToString(credential.toByteArray(), Base64.NO_WRAP)
+                setRequestProperty("Authorization", "Basic $encodedCredential")
+            }
             setRequestProperty("Content-Type", "text/plain; charset=utf-8")
         }
         connection.outputStream.use { output ->

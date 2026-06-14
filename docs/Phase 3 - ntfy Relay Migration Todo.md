@@ -48,7 +48,7 @@ Sender subscribes to `to-sender` and dispatches commands to Android media sessio
 - Generate a random `pairId` during pairing.
 - Do not use phone model names, user names, or phone numbers in topics.
 - Keep topics unguessable when public ntfy or shared infrastructure is used.
-- Prefer self-hosted ntfy with authentication and deny-by-default access control.
+- Prefer self-hosted ntfy. ntfy authentication is optional for a personal server when Axon payload encryption is enabled, and recommended for shared or public relay servers.
 
 ## Milestone 1: Transport Mode Foundation
 
@@ -320,7 +320,7 @@ Implementation files:
 - [x] Add relay privacy warning:
   - [x] Axon payloads are encrypted with the pair secret.
   - [x] Relay metadata such as topic names, timing, message sizes, client IPs, and account activity remains visible to the ntfy server.
-  - [x] Server-side auth and deny-by-default ACLs are still required.
+  - [x] Server-side auth and deny-by-default ACLs are optional for personal servers and recommended for shared/public servers.
 - [x] Add troubleshooting for:
   - [x] auth failure
   - [x] wrong pair ID

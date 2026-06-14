@@ -137,8 +137,8 @@ Required app settings on both devices:
 - Server URL, for example `https://axon-ntfy.example.com`.
 - Pair ID.
 - Pair secret.
-- Username.
-- Password or token credential.
+- Username, optional when the personal ntfy server allows anonymous topic access.
+- Password or token credential, optional with username.
 - Topic prefix, default `axon`.
 
 The pair ID and pair secret must match on both phones.
@@ -150,7 +150,7 @@ Relay payloads are encrypted in the app before publishing to ntfy:
 - Message authentication rejects tampered payloads.
 - Unpairing rotates the pair ID and clears the old pair secret.
 
-The ntfy server still sees topic names, timestamps, message sizes, client IPs, and account activity. Run ntfy with authentication and deny-by-default access control. Do not use a public anonymous ntfy topic for real Axon traffic.
+The ntfy server still sees topic names, timestamps, message sizes, client IPs, and account activity. For a personal server, Axon can run without ntfy authentication because the app payload is encrypted and authenticated with the pair secret. ntfy authentication and deny-by-default ACLs are still recommended when the server is shared, public, or exposed to people you do not trust.
 
 Self-hosting guide:
 
@@ -299,9 +299,9 @@ adb install -r /Users/espitman/Desktop/axon-release.apk
 
 ### ntfy Auth Failure
 
+- If your personal server allows anonymous access, leave both username and password/token empty.
+- If your server requires auth, fill both username and password/token.
 - Confirm the app username and password/token match the ntfy user.
-- Confirm the server is running with `NTFY_AUTH_FILE`.
-- Confirm `NTFY_AUTH_DEFAULT_ACCESS=deny-all`.
 - Confirm topic ACLs allow the correct direction for each user.
 
 ### Wrong Pair ID Or Pair Secret
@@ -335,9 +335,9 @@ adb install -r /Users/espitman/Desktop/axon-release.apk
 ## Current Limitations
 
 - Axon is experimental and side-load oriented.
-- ntfy mode requires a correctly configured self-hosted server for real personal data.
+- ntfy mode requires a self-hosted server for real personal data.
 - ntfy payloads are encrypted, but relay metadata such as topics, timing, and message sizes remain visible to the server.
-- ntfy credentials and pair secrets are stored locally on the device.
+- ntfy credentials are optional; pair secrets are stored locally on the device.
 - Full-screen call alerts depend on Android and OEM settings.
 - Reject call is experimental and may fail on some devices.
 - Watch behavior depends on the phone companion app and its allowlist.

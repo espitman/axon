@@ -14,11 +14,33 @@ Base URL:
 https://axon-ntfy.liara.run
 ```
 
-The server is hosted on Liara and uses ntfy authentication/access control.
+The server is hosted on Liara. Axon can use it with or without ntfy authentication.
 
-## Required Server Environment
+For the current personal setup, ntfy authentication is optional because Axon encrypts and authenticates relay payloads in the Android app with the shared pair secret.
 
-The ntfy server must run with authentication enabled and anonymous access denied.
+Use ntfy authentication/access control when the server is shared, public, or exposed to users you do not trust.
+
+## Personal Server Mode
+
+For a private server used only by one Axon pair or one trusted owner, the minimal setup is:
+
+```text
+NTFY_BASE_URL=https://axon-ntfy.liara.run
+NTFY_BEHIND_PROXY=true
+```
+
+In this mode:
+
+- Axon username and password/token fields should be left empty.
+- ntfy topics may be anonymously readable/writable.
+- Axon still encrypts payload content before publish.
+- Axon rejects payloads that cannot be decrypted/authenticated with the pair secret.
+- Topic names, timestamps, message sizes, client IPs, and activity remain visible to the server.
+- Random pair IDs and strong pair secrets are important because server ACLs are not protecting topics.
+
+## Optional Server Auth Mode
+
+For a shared or more exposed server, run ntfy with authentication enabled and anonymous access denied.
 
 Recommended environment variables:
 
@@ -35,9 +57,9 @@ Important:
 - `NTFY_AUTH_DEFAULT_ACCESS=deny-all` prevents anonymous read/write access to unknown topics.
 - `/var/lib/ntfy/user.db` should live on persistent storage. If the container filesystem is not persistent, users and ACLs may disappear after redeploy.
 
-## Minimal Setup Checklist
+## Minimal Setup Checklist With ntfy Auth
 
-Use this order for a fresh self-hosted relay:
+Use this order if ntfy authentication/access control is enabled:
 
 1. Deploy ntfy behind HTTPS.
 2. Set `NTFY_BASE_URL` to the public HTTPS URL.
@@ -50,12 +72,13 @@ Use this order for a fresh self-hosted relay:
 9. Grant topic-specific ACLs.
 10. Run the authenticated and unauthorized `curl` checks in this document.
 11. Put the same server URL, pair ID, and pair secret into both Axon phones.
+12. Put each role's username and password/token into Axon.
 
 If `ntfy user add` says `auth-file does not exist`, start the server once with `NTFY_AUTH_FILE` configured, then run the user command again inside the same configured container/environment.
 
 If `ntfy user add --auth-file=...` fails, do not pass `--auth-file`; this ntfy CLI reads the configured auth file from server configuration or environment.
 
-## Users
+## Users For Auth Mode
 
 Two regular users are used:
 
@@ -266,7 +289,33 @@ Expected result:
 401 or 403
 ```
 
-## App Settings For First Integration
+## App Settings For Personal Open Relay
+
+Sender device:
+
+```text
+Server URL: https://axon-ntfy.liara.run
+Pair ID: p1-test
+Pair secret: shared secret generated in Axon
+Username: empty
+Password: empty
+Publish topic: axon-p1-test-to-receiver
+Subscribe topic: axon-p1-test-to-sender
+```
+
+Receiver device:
+
+```text
+Server URL: https://axon-ntfy.liara.run
+Pair ID: p1-test
+Pair secret: same shared secret as Sender
+Username: empty
+Password: empty
+Subscribe topic: axon-p1-test-to-receiver
+Publish topic: axon-p1-test-to-sender
+```
+
+## App Settings With ntfy Auth
 
 Sender device:
 
@@ -294,8 +343,10 @@ Publish topic: axon-p1-test-to-sender
 
 ## Notes For App Implementation
 
-- Use Basic Auth for the first implementation slice.
-- Later, move to ntfy access tokens so the app does not store raw account passwords.
+- If username and password/token are both empty, Axon publishes and subscribes without an `Authorization` header.
+- If username and password/token are both filled, Axon uses Basic Auth.
+- If only one auth field is filled, Axon treats the settings as invalid.
+- Later, access tokens are preferred over raw account passwords when auth is enabled.
 - Axon relay payloads are encrypted with an app-level pair secret before publish.
 - Use `json?poll=1` only for manual tests and cached-message checks.
 - The app should use a live subscription endpoint, either:
@@ -309,20 +360,22 @@ Publish topic: axon-p1-test-to-sender
 
 Before using this with real personal data for more than local testing:
 
-- Replace test passwords with strong unique passwords.
-- Prefer access tokens over account passwords in the Android app.
+- Use a strong random pair ID.
 - Keep the Axon pair secret private and identical on both paired devices.
-- Keep `deny-all` enabled for anonymous/default access.
-- Confirm `/var/lib/ntfy/user.db` is persisted across deploys.
+- If ntfy auth is enabled, replace test passwords with strong unique passwords.
+- If ntfy auth is enabled, prefer access tokens over account passwords in the Android app.
+- If ntfy auth is enabled, keep `deny-all` enabled for anonymous/default access.
+- If ntfy auth is enabled, confirm `/var/lib/ntfy/user.db` is persisted across deploys.
 
 ## Troubleshooting
 
-### Auth Failure In Axon
+### Auth Setup In Axon
 
-- Confirm the username/password or token is correct for that role.
-- Confirm the running ntfy process has `NTFY_AUTH_FILE=/var/lib/ntfy/user.db`.
-- Confirm the running ntfy process has `NTFY_AUTH_DEFAULT_ACCESS=deny-all`.
-- Confirm `ntfy access` shows read/write permissions for the exact topic names used by Axon.
+- For personal open relay mode, leave both username and password/token empty.
+- For auth mode, fill both username and password/token.
+- If only one auth field is filled, Axon rejects the settings.
+- In auth mode, confirm the username/password or token is correct for that role.
+- In auth mode, confirm `ntfy access` shows read/write permissions for the exact topic names used by Axon.
 
 ### Wrong Pair ID
 

@@ -2430,15 +2430,15 @@ private fun NtfySettingsFields(
             SettingsTextField(
                 value = ntfySettings.username,
                 onValueChange = { onNtfySettingsChanged(ntfySettings.copy(username = it)) },
-                label = "Username",
-                placeholder = "axon_sender",
+                label = "Username (optional)",
+                placeholder = "Optional",
                 modifier = Modifier.weight(1f)
             )
             SettingsTextField(
                 value = ntfySettings.password,
                 onValueChange = { onNtfySettingsChanged(ntfySettings.copy(password = it)) },
-                label = "Password / token",
-                placeholder = "Required",
+                label = "Password / token (optional)",
+                placeholder = "Optional",
                 isSecret = true,
                 modifier = Modifier.weight(1f)
             )
